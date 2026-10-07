@@ -966,6 +966,7 @@ bool HlsStream::CreatePackagers()
 			//////////////////////////////////
 			mpegts::Packager::Config packager_config;
 			packager_config.target_duration_ms = _ts_config.GetSegmentDuration() * 1000;
+			packager_config.enable_max_duration = _ts_config.IsMaxDurationEnabled();
 			packager_config.max_segment_count = _ts_config.GetSegmentCount();
 
 			auto dvr_config = _ts_config.GetDvr();

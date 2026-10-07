@@ -1297,7 +1297,10 @@ void LLHlsStream::SendDataFrame(const std::shared_ptr<MediaPacket> &media_packet
 		// interval to be strictly shorter than the segment duration and to divide
 		// it evenly; an equal interval also breaks the alignment. Synced mode
 		// follows the reference's realized cuts, so any interval aligns.
-		if (_cue_alignment_warned == false && GetSegmentationMode() == LLHlsSegmentationMode::Duration)
+		auto llhls_config = GetApplication()->GetConfig().GetPublishers().GetLLHlsPublisher();
+		if (_cue_alignment_warned == false &&
+			GetSegmentationMode() == LLHlsSegmentationMode::Duration &&
+			llhls_config.IsMaxDurationEnabled() == false)
 		{
 			auto video_track = GetFirstTrackByType(cmn::MediaType::Video);
 			if (video_track != nullptr)
@@ -1906,12 +1909,25 @@ bool LLHlsStream::AddPackager(const std::shared_ptr<const MediaTrack> &media_tra
 	policy_config.segment_duration_ms = _storage_config.segment_duration_ms;
 	policy_config.chunk_duration_ms = packager_config.chunk_duration_ms;
 	policy_config.cue_out_cut_mode = llhls_config.GetCueOutCutMode();
-	// Video cuts only at keyframes; audio can cut at any frame
-	policy_config.keyframe_interval_ms = (media_track->GetMediaType() == cmn::MediaType::Video) ? media_track->GetKeyframeIntervalDurationMs() : 0.0;
+	policy_config.enable_max_duration = llhls_config.IsMaxDurationEnabled();
+	// Every rendition receives the reference video's capped cadence. Duration
+	// mode uses it directly; synced mode uses it when the reference stalls.
+	auto duration_reference_track = GetReferenceTrack();
+	policy_config.keyframe_interval_ms =
+		(policy_config.enable_max_duration == true &&
+		 duration_reference_track != nullptr &&
+		 duration_reference_track->GetMediaType() == cmn::MediaType::Video)
+			? duration_reference_track->GetPreciseKeyframeIntervalDurationMs()
+			: ((media_track->GetMediaType() == cmn::MediaType::Video) ? media_track->GetKeyframeIntervalDurationMs() : 0.0);
 	policy_config.log_context = ov::String::FormatString("LLHLS stream (%s) / track (%u)", tag.CStr(), media_track->GetId());
 	if (server_time_based_segment_numbering == true)
 	{
-		policy_config.initial_segment_number = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count() / static_cast<double>(_storage_config.segment_duration_ms);
+		const int64_t numbering_duration_us = policy_config.enable_max_duration
+												 ? bmff::SegmentBoundaryPolicy::GetTargetDurationUs(policy_config)
+												 : static_cast<int64_t>(_storage_config.segment_duration_ms) * 1000;
+		policy_config.initial_segment_number =
+			std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count() /
+			static_cast<double>(numbering_duration_us);
 	}
 
 	std::shared_ptr<bmff::SegmentBoundaryPolicy> boundary_policy;
@@ -1939,7 +1955,12 @@ bool LLHlsStream::AddPackager(const std::shared_ptr<const MediaTrack> &media_tra
 			reference_config.chunk_duration_ms = std::round(ComputeOptimalPartDuration(reference_track));
 			// The cadence must be the reference's own; policy_config carries the
 			// one of whichever track this call is for
-			reference_config.keyframe_interval_ms = (reference_track->GetMediaType() == cmn::MediaType::Video) ? reference_track->GetKeyframeIntervalDurationMs() : 0.0;
+			reference_config.keyframe_interval_ms =
+				(reference_track->GetMediaType() == cmn::MediaType::Video)
+					? (reference_config.enable_max_duration
+						   ? reference_track->GetPreciseKeyframeIntervalDurationMs()
+						   : reference_track->GetKeyframeIntervalDurationMs())
+					: 0.0;
 			reference_config.log_context = ov::String::FormatString("LLHLS stream (%s) / track (%u)", tag.CStr(), reference_track->GetId());
 			_reference_boundary_policy = std::make_shared<bmff::ReferenceBoundaryPolicy>(reference_config, reference_track->GetFrameRate());
 		}
@@ -1956,7 +1977,14 @@ bool LLHlsStream::AddPackager(const std::shared_ptr<const MediaTrack> &media_tra
 	else
 	{
 		// Server-time numbering paces every segment as one wall-clock slot
-		boundary_policy = std::make_shared<bmff::DurationBoundaryPolicy>(policy_config, server_time_based_segment_numbering);
+		if (policy_config.enable_max_duration == true)
+		{
+			boundary_policy = std::make_shared<bmff::TargetDurationBoundaryPolicy>(policy_config, server_time_based_segment_numbering);
+		}
+		else
+		{
+			boundary_policy = std::make_shared<bmff::DurationBoundaryPolicy>(policy_config, server_time_based_segment_numbering);
+		}
 	}
 
 	{

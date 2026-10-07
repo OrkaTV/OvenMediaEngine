@@ -22,10 +22,37 @@ namespace mpegts
         _packager_id = packager_id;
         _config = config;
 		_next_target_duration_ms = config.target_duration_ms;
+        _maximum_segment_duration_ms = config.target_duration_ms;
 
 		// Until the main track is known, the cadence is the configured duration
 		SetCutCadenceMs(config.target_duration_ms, 0.0);
     }
+
+	void Packager::UpdateTargetDuration(const std::shared_ptr<const MediaTrack> &main_track)
+	{
+		_maximum_segment_duration_ms = _config.target_duration_ms;
+		const double keyframe_interval_ms =
+			(main_track != nullptr && main_track->GetMediaType() == cmn::MediaType::Video)
+				? (_config.enable_max_duration
+					   ? main_track->GetPreciseKeyframeIntervalDurationMs()
+					   : main_track->GetKeyframeIntervalDurationMs())
+				: 0.0;
+
+		if (_config.enable_max_duration == true && keyframe_interval_ms > 0.0)
+		{
+			const int64_t configured_us = static_cast<int64_t>(_config.target_duration_ms) * 1000;
+			const int64_t keyframe_interval_us = static_cast<int64_t>(keyframe_interval_ms * 1000.0 + 0.5);
+			if (keyframe_interval_us > 0)
+			{
+				const int64_t intervals = std::max<int64_t>(1, configured_us / keyframe_interval_us);
+				_maximum_segment_duration_ms = static_cast<double>(intervals * keyframe_interval_us) / 1000.0;
+			}
+		}
+
+		_next_target_duration_ms = std::min(_next_target_duration_ms, _maximum_segment_duration_ms);
+		SetCutCadenceMs(_maximum_segment_duration_ms,
+						_config.enable_max_duration ? 0.0 : keyframe_interval_ms);
+	}
 
     Packager::~Packager()
     {
@@ -124,11 +151,12 @@ namespace mpegts
             _sample_buffers.emplace(track->GetId(), std::make_shared<SampleBuffer>(track));
         }
 
-		// Video cuts only at keyframes, so the real cadence follows its interval
+		// Video cuts only at keyframes, so target the largest whole number of
+		// GOPs that does not exceed EXT-X-TARGETDURATION.
 		auto main_track_it = _media_tracks.find(_main_track_id);
-		if (main_track_it != _media_tracks.end() && main_track_it->second->GetMediaType() == cmn::MediaType::Video)
+		if (main_track_it != _media_tracks.end())
 		{
-			SetCutCadenceMs(_config.target_duration_ms, main_track_it->second->GetKeyframeIntervalDurationMs());
+			UpdateTargetDuration(main_track_it->second);
 		}
 
         _psi_packets = psi_packets;
@@ -209,6 +237,7 @@ namespace mpegts
 			}
 
 			it->second = media_track;
+			UpdateTargetDuration(media_track);
 			auto sample_buffer = GetSampleBuffer(media_track->GetId());
 			if (sample_buffer != nullptr)
 			{
@@ -418,7 +447,8 @@ namespace mpegts
 				_force_make_boundary = true;
 			}
 
-			if (boundary_marked == false && ((sample_buffer->GetCurrentDurationMs() >= _next_target_duration_ms) || _force_make_boundary == true))
+			const double boundary_tolerance_ms = _config.enable_max_duration ? 1.0 : 0.0;
+			if (boundary_marked == false && ((sample_buffer->GetCurrentDurationMs() >= _next_target_duration_ms - boundary_tolerance_ms) || _force_make_boundary == true))
 			{
 				if (media_packet->GetMediaType() == cmn::MediaType::Video && media_packet->IsKeyFrame())
 				{
@@ -655,7 +685,7 @@ namespace mpegts
 		// back would break EXT-X-TARGETDURATION.
 		_next_target_duration_ms -= segment->GetDurationMs();
 		_next_target_duration_ms += _config.target_duration_ms;
-		_next_target_duration_ms = std::min(_next_target_duration_ms, static_cast<double>(_config.target_duration_ms));
+		_next_target_duration_ms = std::min(_next_target_duration_ms, _maximum_segment_duration_ms);
 
         AddSegment(segment);
     }

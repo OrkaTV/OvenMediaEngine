@@ -19,6 +19,7 @@
 #include "monitoring/monitoring.h"
 
 #include "modules/containers/bmff/fmp4_packager/duration_boundary_policy.h"
+#include "modules/containers/bmff/fmp4_packager/target_duration_boundary_policy.h"
 #include "modules/containers/bmff/fmp4_packager/fmp4_packager.h"
 #include "modules/containers/bmff/fmp4_packager/synced_boundary_policy.h"
 #include "modules/containers/webvtt/webvtt_packager.h"
