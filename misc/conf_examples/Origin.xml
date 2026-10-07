@@ -369,6 +369,8 @@
 							<!-- PartHoldBack SHOULD be at least three times the Part Target Duration -->
 							<PartHoldBack>1.5</PartHoldBack>
 							<SegmentDuration>6</SegmentDuration>
+							<!-- Use the largest whole-GOP duration that does not exceed SegmentDuration -->
+							<EnableMaxDuration>false</EnableMaxDuration>
 							<SegmentCount>10</SegmentCount>
 							<CrossDomains>
 								<Url>*</Url>
@@ -378,6 +380,8 @@
 						<HLS>
 							<SegmentCount>4</SegmentCount>
 							<SegmentDuration>4</SegmentDuration>
+							<!-- Use the largest whole-GOP duration that does not exceed SegmentDuration -->
+							<EnableMaxDuration>false</EnableMaxDuration>
 							<!-- <DVR>
 								<Enable>true</Enable>
 								<EventPlaylistType>false</EventPlaylistType>

@@ -226,6 +226,23 @@ TEST(SyncedBoundaryPolicyTest, StalledReferenceFallsBackToSelfPacing)
 	EXPECT_EQ(PlanAt(policy, 1000.0).end_us, 1000000 + static_cast<int64_t>(kSegmentDurationMs) * 1000);
 }
 
+TEST(SyncedBoundaryPolicyTest, MaxDurationCapsFallbackPacing)
+{
+	auto config = MakeConfig(0, "test-max-duration");
+	config.segment_duration_ms = 2000;
+	config.keyframe_interval_ms = 1900.0;
+	config.enable_max_duration = true;
+
+	auto reference = std::make_shared<bmff::ReferenceBoundaryPolicy>(config, 10.0);
+	auto policy = std::make_shared<bmff::SyncedBoundaryPolicy>(reference, config);
+
+	AppendToReference(reference, 1000.0);
+	Arrive(policy, 1000.0);
+	Arrive(policy, 5100.0);
+	ASSERT_TRUE(policy->IsInFallback());
+	EXPECT_EQ(PlanAt(policy, 1000.0).end_us, 2900000);
+}
+
 TEST(SyncedBoundaryPolicyTest, TheOpeningAnchorFreesTheFollowersAtTheFirstChunk)
 {
 	auto reference = MakeReference(0.0, 10);
@@ -414,6 +431,19 @@ TEST(ReferenceBoundaryPolicyTest, BoundariesSnapToTheFrameCadence)
 
 	// Every position sits exactly on a frame
 	EXPECT_NEAR(std::remainder(static_cast<double>(first), frame_period_us), 0.0, 1.0);
+}
+
+TEST(ReferenceBoundaryPolicyTest, GopCadenceKeepsBoundariesWithinTargetDuration)
+{
+	auto config = MakeConfig(0, "test-reference");
+	config.segment_duration_ms = 2000;
+	config.keyframe_interval_ms = 1900.0;
+	config.enable_max_duration = true;
+	auto reference = std::make_shared<bmff::ReferenceBoundaryPolicy>(config, 10.0);
+
+	auto boundary = reference->GetSegmentBoundary(static_cast<int64_t>(0));
+	EXPECT_LE(boundary.end_us + 1, 2000000);
+	EXPECT_EQ(boundary.end_us + 1, 1900000);
 }
 
 TEST(ReferenceBoundaryPolicyTest, BoundaryFollowsTheSegmentStart)

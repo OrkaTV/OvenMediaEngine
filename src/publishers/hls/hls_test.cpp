@@ -27,13 +27,19 @@ namespace
 		return track;
 	}
 
-	std::shared_ptr<const MediaPacket> MakeVideoKeyFrame(uint32_t track_id, int64_t dts, int64_t duration)
+	std::shared_ptr<const MediaPacket> MakeVideoFrame(uint32_t track_id, int64_t dts, int64_t duration, bool keyframe)
 	{
 		auto data = std::make_shared<ov::Data>();
 		uint8_t byte = 0x00;
 		data->Append(&byte, 1);
 		return std::make_shared<MediaPacket>(cmn::MediaType::Video, track_id, data, dts, dts, duration,
-											 MediaPacketFlag::Key, cmn::BitstreamFormat::H264_ANNEXB, cmn::PacketType::NALU);
+											 keyframe ? MediaPacketFlag::Key : MediaPacketFlag::NoFlag,
+											 cmn::BitstreamFormat::H264_ANNEXB, cmn::PacketType::NALU);
+	}
+
+	std::shared_ptr<const MediaPacket> MakeVideoKeyFrame(uint32_t track_id, int64_t dts, int64_t duration)
+	{
+		return MakeVideoFrame(track_id, dts, duration, true);
 	}
 
 	std::shared_ptr<const MediaPacket> MakeAudioFrame(uint32_t track_id, int64_t dts, int64_t duration)
@@ -215,6 +221,107 @@ TEST(HlsPackager, MainTrackChangeMarksDiscontinuity)
 	}
 
 	EXPECT_EQ(discontinuity_count, 1);
+}
+
+TEST(HlsPackager, GopCadenceKeepsSegmentsWithinTargetDuration)
+{
+	mpegts::Packager::Config config;
+	config.target_duration_ms = 2000;
+	config.enable_max_duration = true;
+	config.max_segment_count = 100;
+	config.segment_retention_count = 0;
+
+	auto packager = std::make_shared<mpegts::Packager>("variant", config);
+	auto sink = std::make_shared<CollectingPackagerSink>();
+	packager->AddSink(sink);
+
+	auto track = MakeTrack(1, cmn::MediaType::Video, cmn::MediaCodecId::H264, 1);
+	track->SetFrameRateByConfig(10.0);
+	track->SetKeyFrameIntervalByConfig(19);
+	packager->OnPsi({track}, {});
+
+	auto ts = std::make_shared<ov::Data>();
+	uint8_t byte = 0x47;
+	ts->Append(&byte, 1);
+
+	constexpr int64_t kFrameTicks = 9000;
+	for (int64_t index = 0; index < 80; index++)
+	{
+		packager->OnFrame(MakeVideoFrame(1, index * kFrameTicks, kFrameTicks, index % 19 == 0), ts);
+	}
+
+	ASSERT_GE(sink->_created.size(), 3u);
+	for (const auto &segment : sink->_created)
+	{
+		EXPECT_LE(segment->GetDurationMs(), 2000.0);
+		EXPECT_DOUBLE_EQ(segment->GetDurationMs(), 1900.0);
+	}
+}
+
+TEST(HlsPackager, DisabledMaxDurationKeepsLegacyBoundaryPolicy)
+{
+	mpegts::Packager::Config config;
+	config.target_duration_ms = 2000;
+	config.enable_max_duration = false;
+	config.max_segment_count = 100;
+	config.segment_retention_count = 0;
+
+	auto packager = std::make_shared<mpegts::Packager>("variant", config);
+	auto sink = std::make_shared<CollectingPackagerSink>();
+	packager->AddSink(sink);
+
+	auto track = MakeTrack(1, cmn::MediaType::Video, cmn::MediaCodecId::H264, 1);
+	track->SetFrameRateByConfig(10.0);
+	track->SetKeyFrameIntervalByConfig(19);
+	packager->OnPsi({track}, {});
+
+	auto ts = std::make_shared<ov::Data>();
+	uint8_t byte = 0x47;
+	ts->Append(&byte, 1);
+
+	constexpr int64_t kFrameTicks = 9000;
+	for (int64_t index = 0; index < 80; index++)
+	{
+		packager->OnFrame(MakeVideoFrame(1, index * kFrameTicks, kFrameTicks, index % 19 == 0), ts);
+	}
+
+	ASSERT_GE(sink->_created.size(), 1u);
+	EXPECT_DOUBLE_EQ(sink->_created.front()->GetDurationMs(), 3800.0);
+}
+
+TEST(HlsPackager, FractionalFrameRateStaysWithinTargetDuration)
+{
+	mpegts::Packager::Config config;
+	config.target_duration_ms = 6000;
+	config.enable_max_duration = true;
+	config.max_segment_count = 100;
+	config.segment_retention_count = 0;
+
+	auto packager = std::make_shared<mpegts::Packager>("variant", config);
+	auto sink = std::make_shared<CollectingPackagerSink>();
+	packager->AddSink(sink);
+
+	auto track = MakeTrack(1, cmn::MediaType::Video, cmn::MediaCodecId::H264, 1);
+	track->SetFrameRateByConfig(30000.0 / 1001.0);
+	track->SetKeyFrameIntervalByConfig(60);
+	packager->OnPsi({track}, {});
+
+	auto ts = std::make_shared<ov::Data>();
+	uint8_t byte = 0x47;
+	ts->Append(&byte, 1);
+
+	constexpr int64_t kFrameTicks = 3003;
+	for (int64_t index = 0; index < 300; index++)
+	{
+		packager->OnFrame(MakeVideoFrame(1, index * kFrameTicks, kFrameTicks, index % 60 == 0), ts);
+	}
+
+	ASSERT_GE(sink->_created.size(), 2u);
+	for (const auto &segment : sink->_created)
+	{
+		EXPECT_LE(segment->GetDurationMs(), 6000.0);
+		EXPECT_DOUBLE_EQ(segment->GetDurationMs(), 4004.0);
+	}
 }
 
 TEST(HlsPackager, RequestCutDeduplicatesNearbyBoundary)

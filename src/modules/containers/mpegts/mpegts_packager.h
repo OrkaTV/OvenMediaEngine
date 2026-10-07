@@ -447,6 +447,7 @@ namespace mpegts
         struct Config
         {
             uint32_t target_duration_ms = 6000;
+			bool enable_max_duration = false;
 			uint32_t max_segment_count = 10; // 10 segments, it will be saved in memory
 
 			// Live Rewind
@@ -545,6 +546,7 @@ namespace mpegts
 
         std::shared_ptr<const MediaTrack> GetMediaTrack(uint32_t track_id) const;
         std::shared_ptr<SampleBuffer> GetSampleBuffer(uint32_t track_id) const;
+		void UpdateTargetDuration(const std::shared_ptr<const MediaTrack> &main_track);
 
         // Check if a segment is ready to be created and create it
         void CreateSegmentIfReady(bool force_create = false);
@@ -616,5 +618,6 @@ namespace mpegts
 		std::vector<std::shared_ptr<PackagerSink>> _sinks;
 
 		double _next_target_duration_ms = 0.0; // next target duration in milliseconds
+		double _maximum_segment_duration_ms = 0.0;
     };
 }

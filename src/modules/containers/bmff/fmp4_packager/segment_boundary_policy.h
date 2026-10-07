@@ -82,6 +82,9 @@ namespace bmff
 			// The cadence this track can cut at (0 when it can cut anywhere).
 			// A break must be long enough to return from at that cadence.
 			double keyframe_interval_ms = 0.0;
+			// Cap natural segment boundaries to a whole number of keyframe
+			// intervals at or below segment_duration_ms.
+			bool enable_max_duration = false;
 			// Where the numbering starts (server-time based numbering derives it
 			// from the wall clock)
 			int64_t initial_segment_number = 0;
@@ -91,6 +94,10 @@ namespace bmff
 		};
 
 		explicit SegmentBoundaryPolicy(const Config &config);
+
+		// The largest whole-keyframe duration that does not exceed the
+		// configured segment duration.
+		static int64_t GetTargetDurationUs(const Config &config);
 
 		virtual ~SegmentBoundaryPolicy() = default;
 
@@ -221,10 +228,9 @@ namespace bmff
 
 		int64_t _segment_duration_us = 0;
 		int64_t _chunk_duration_us = 0;
-		// The cadence this track really cuts at: the segment duration rounded up
-		// to whole keyframe intervals. A break must span at least one of it to
-		// return from, and a position it has passed by more than one is beyond
-		// saving.
+		// The cadence this track really cuts at. A break must span at least one
+		// of it to return from, and a position it has passed by more than one is
+		// beyond saving.
 		int64_t _cut_cadence_us = 0;
 		LLHlsCueOutCutMode _cue_out_cut_mode = LLHlsCueOutCutMode::Keyframe;
 		ov::String _log_context;

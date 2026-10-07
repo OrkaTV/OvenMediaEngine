@@ -852,6 +852,22 @@ double MediaTrack::GetKeyframeIntervalDurationMs() const
 	return (keyframe_interval / framerate) * 1000.0;
 }
 
+double MediaTrack::GetPreciseKeyframeIntervalDurationMs() const
+{
+	if (GetKeyFrameIntervalTypeByConfig() == cmn::KeyFrameIntervalType::TIME)
+	{
+		return GetKeyFrameIntervalByConfig();
+	}
+
+	const double framerate = GetFrameRate();
+	if (framerate <= 0.0)
+	{
+		return 0.0;
+	}
+
+	return (GetKeyFrameInterval() / framerate) * 1000.0;
+}
+
 int32_t MediaTrack::GetBitrateByMeasured() const
 {
 	auto stats = GetStats();

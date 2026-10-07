@@ -130,6 +130,7 @@ public:
 	double GetFrameRate() const;
 	double GetKeyFrameInterval() const;
 	double GetKeyframeIntervalDurationMs() const;
+	double GetPreciseKeyframeIntervalDurationMs() const;
 
 	// Measured values, delegated to the linked statistics
 	int32_t GetBitrateByMeasured() const;

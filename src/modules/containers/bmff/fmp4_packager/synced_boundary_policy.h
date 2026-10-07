@@ -119,6 +119,7 @@ namespace bmff
 	private:
 		std::shared_ptr<BoundaryFeed> _boundary_feed;
 		double _video_frame_rate = 0;
+		int64_t _target_segment_duration_us = 0;
 
 		// Whether the opening anchor went out with the first stored chunk; the
 		// reference's media thread is the only writer
@@ -187,6 +188,7 @@ namespace bmff
 		std::optional<int64_t> DeriveAnchor(int64_t segment_start_us) const;
 
 		std::shared_ptr<const BoundaryFeed> _boundary_feed;
+		int64_t _target_segment_duration_us = 0;
 
 		mutable std::atomic<bool> _fallback_logged{false};
 

@@ -145,7 +145,8 @@ namespace bmff
 	ReferenceBoundaryPolicy::ReferenceBoundaryPolicy(const Config &config, double video_frame_rate)
 		: SegmentBoundaryPolicy(config),
 		  _boundary_feed(std::make_shared<BoundaryFeed>(config.log_context)),
-		  _video_frame_rate(video_frame_rate)
+		  _video_frame_rate(video_frame_rate),
+		  _target_segment_duration_us(config.enable_max_duration ? GetTargetDurationUs(config) : _segment_duration_us)
 	{
 	}
 
@@ -164,11 +165,11 @@ namespace bmff
 
 		// The origin itself is a boundary, so the search starts at it; the check
 		// below rejects it when the segment already starts there
-		int64_t multiple = std::max(static_cast<int64_t>(0), (position_us - origin_us) / _segment_duration_us);
+		int64_t multiple = std::max(static_cast<int64_t>(0), (position_us - origin_us) / _target_segment_duration_us);
 
 		while (true)
 		{
-			int64_t boundary_us = origin_us + (multiple * _segment_duration_us);
+			int64_t boundary_us = origin_us + (multiple * _target_segment_duration_us);
 
 			// The aimed position must be a real frame position, so the realized
 			// cut can land exactly on it when the keyframe cadence allows.
@@ -273,7 +274,8 @@ namespace bmff
 	SyncedBoundaryPolicy::SyncedBoundaryPolicy(const std::shared_ptr<const ReferenceBoundaryPolicy> &reference_policy,
 											   const Config &config)
 		: SegmentBoundaryPolicy(config),
-		  _boundary_feed(reference_policy != nullptr ? reference_policy->GetBoundaryFeed() : nullptr)
+		  _boundary_feed(reference_policy != nullptr ? reference_policy->GetBoundaryFeed() : nullptr),
+		  _target_segment_duration_us(config.enable_max_duration ? GetTargetDurationUs(config) : _segment_duration_us)
 	{
 		OV_ASSERT2(_boundary_feed != nullptr);
 	}
@@ -369,7 +371,7 @@ namespace bmff
 		else if (IsInFallback() == true)
 		{
 			// The reference stopped; pace this track alone until it returns
-			plan.end_us = *segment_start_us + _segment_duration_us;
+			plan.end_us = *segment_start_us + _target_segment_duration_us;
 		}
 		else
 		{

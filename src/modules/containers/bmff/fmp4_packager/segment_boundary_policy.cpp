@@ -32,18 +32,32 @@ namespace bmff
 		  _log_context(config.log_context),
 		  _next_segment_number(config.initial_segment_number)
 	{
-		// A track that cuts only at a keyframe reaches its cadence in whole
-		// keyframe intervals, so the shortest packageable break follows that
-		// rounded cadence instead of the configured duration
+		if (config.enable_max_duration == true)
+		{
+			_cut_cadence_us = GetTargetDurationUs(config);
+			return;
+		}
+
 		_cut_cadence_us = _segment_duration_us;
-		// Judged after the conversion: an interval that rounds away to nothing
-		// cannot divide the duration
-		int64_t keyframe_interval_us = static_cast<int64_t>(config.keyframe_interval_ms * 1000.0 + 0.5);
+		const int64_t keyframe_interval_us = static_cast<int64_t>(config.keyframe_interval_ms * 1000.0 + 0.5);
 		if (keyframe_interval_us > 0)
 		{
-			int64_t intervals = (_segment_duration_us + keyframe_interval_us - 1) / keyframe_interval_us;
+			const int64_t intervals = (_segment_duration_us + keyframe_interval_us - 1) / keyframe_interval_us;
 			_cut_cadence_us = std::max(_cut_cadence_us, intervals * keyframe_interval_us);
 		}
+	}
+
+	int64_t SegmentBoundaryPolicy::GetTargetDurationUs(const Config &config)
+	{
+		const int64_t configured_us = static_cast<int64_t>(config.segment_duration_ms) * 1000;
+		const int64_t keyframe_interval_us = static_cast<int64_t>(config.keyframe_interval_ms * 1000.0 + 0.5);
+		if (keyframe_interval_us <= 0)
+		{
+			return configured_us;
+		}
+
+		const int64_t intervals = std::max<int64_t>(1, configured_us / keyframe_interval_us);
+		return intervals * keyframe_interval_us;
 	}
 
 	//--------------------------------------------------------------------------

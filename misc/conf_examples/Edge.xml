@@ -254,6 +254,8 @@
 						<LLHLS>
 							<ChunkDuration>0.5</ChunkDuration>
 							<SegmentDuration>6</SegmentDuration>
+							<!-- Use the largest whole-GOP duration that does not exceed SegmentDuration -->
+							<EnableMaxDuration>false</EnableMaxDuration>
 							<SegmentCount>10</SegmentCount>
 							<CrossDomains>
 								<Url>*</Url>
@@ -263,6 +265,8 @@
 						<HLS>
 							<SegmentCount>4</SegmentCount>
 							<SegmentDuration>4</SegmentDuration>
+							<!-- Use the largest whole-GOP duration that does not exceed SegmentDuration -->
+							<EnableMaxDuration>false</EnableMaxDuration>
 							<CrossDomains>
 								<Url>*</Url>
 							</CrossDomains>
