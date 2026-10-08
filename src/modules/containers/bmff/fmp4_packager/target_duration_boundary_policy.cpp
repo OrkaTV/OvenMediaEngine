@@ -16,9 +16,30 @@ namespace bmff
 	TargetDurationBoundaryPolicy::TargetDurationBoundaryPolicy(const Config &config, bool wall_clock_slot_pacing)
 		: SegmentBoundaryPolicy(config),
 		  _wall_clock_slot_pacing(wall_clock_slot_pacing),
+		  _keyframe_interval_known(config.keyframe_interval_ms > 0.0),
 		  _maximum_segment_duration_us(GetTargetDurationUs(config)),
 		  _target_segment_duration_us(_maximum_segment_duration_us)
 	{
+	}
+
+	void TargetDurationBoundaryPolicy::UpdateKeyframeInterval(double keyframe_interval_ms)
+	{
+		if (_keyframe_interval_known == true || keyframe_interval_ms <= 0.0)
+		{
+			return;
+		}
+
+		Config config;
+		config.segment_duration_ms = _segment_duration_us / 1000;
+		config.keyframe_interval_ms = keyframe_interval_ms;
+
+		_maximum_segment_duration_us = GetTargetDurationUs(config);
+		_target_segment_duration_us = std::min(_target_segment_duration_us, _maximum_segment_duration_us);
+		_cut_cadence_us = _maximum_segment_duration_us;
+		_keyframe_interval_known = true;
+
+		logti("%s - Learned keyframe interval %.3f ms; maximum segment duration is %.3f ms",
+			  _log_context.CStr(), keyframe_interval_ms, _maximum_segment_duration_us / 1000.0);
 	}
 
 	SegmentBoundary TargetDurationBoundaryPolicy::GetSegmentBoundary(std::optional<int64_t> segment_start_us)
