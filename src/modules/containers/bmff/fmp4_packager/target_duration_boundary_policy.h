@@ -27,6 +27,7 @@ namespace bmff
 		TargetDurationBoundaryPolicy(const Config &config, bool wall_clock_slot_pacing);
 
 		SegmentBoundary GetSegmentBoundary(std::optional<int64_t> segment_start_us) override;
+		void UpdateKeyframeInterval(double keyframe_interval_ms);
 
 	protected:
 		CompletionResult DoOnSegmentCompleted(const CompletedSegment &completed, const std::vector<std::shared_ptr<Marker>> &covered_markers) override;
@@ -34,6 +35,7 @@ namespace bmff
 
 	private:
 		bool _wall_clock_slot_pacing = false;
+		bool _keyframe_interval_known = false;
 		int64_t _maximum_segment_duration_us = 0;
 
 		// The pacing ledger: the ideal timeline advances by the configured

@@ -123,6 +123,43 @@ TEST(TargetDurationBoundaryPolicyTest, GopCadenceCapsTheTarget)
 	EXPECT_DOUBLE_EQ(TargetMs(policy), 3800.0);
 }
 
+TEST(TargetDurationBoundaryPolicyTest, LearnedGopCapsTheFirstSegment)
+{
+	constexpr uint64_t kTargetDurationMs = 6000;
+	constexpr double kFrameDurationMs = 100.0;
+	constexpr int64_t kGopFrames = 19;
+
+	bmff::SegmentBoundaryPolicy::Config config;
+	config.segment_duration_ms = kTargetDurationMs;
+	config.chunk_duration_ms = 500.0;
+	config.enable_max_duration = true;
+	config.log_context = "learned_gop_pipeline_test";
+
+	auto policy = std::make_shared<bmff::TargetDurationBoundaryPolicy>(config, false);
+	auto track = fmp4_test::MakeVideoTrack(0, 10.0, kGopFrames);
+	auto pipeline = fmp4_test::MakePipeline(track, std::make_shared<fmp4_test::NullStorageObserver>(), policy,
+											kTargetDurationMs, config.chunk_duration_ms, config.log_context);
+
+	for (int64_t index = 0; index < 140; index++)
+	{
+		const int64_t dts = index * static_cast<int64_t>(kFrameDurationMs);
+		const int64_t local = index % kGopFrames;
+		const bool keyframe = local == 0;
+		if (index == kGopFrames)
+		{
+			policy->UpdateKeyframeInterval(kGopFrames * kFrameDurationMs);
+		}
+
+		ASSERT_TRUE(pipeline.packager->AppendSample(
+			fmp4_test::MakeVideoFrame(0, dts, static_cast<int64_t>(kFrameDurationMs), keyframe, dts)));
+	}
+
+	auto first_segment = pipeline.storage->GetSegment(0);
+	ASSERT_NE(first_segment, nullptr);
+	ASSERT_TRUE(first_segment->IsCompleted());
+	EXPECT_DOUBLE_EQ(first_segment->GetDurationMs(), 5700.0);
+}
+
 TEST(TargetDurationBoundaryPolicyTest, FractionalFrameRateGopStaysWithinTheTarget)
 {
 	bmff::SegmentBoundaryPolicy::Config config;

@@ -1811,6 +1811,29 @@ bool LLHlsStream::AppendMediaPacket(const std::shared_ptr<MediaPacket> &media_pa
 		return true;
 	}
 
+	auto llhls_config = GetApplication()->GetConfig().GetPublishers().GetLLHlsPublisher();
+	auto reference_track = GetReferenceTrack();
+	if (llhls_config.IsMaxDurationEnabled() == true &&
+		reference_track != nullptr &&
+		media_packet->GetTrackId() == reference_track->GetId() &&
+		media_packet->GetFlag() == MediaPacketFlag::Key)
+	{
+		double keyframe_interval_ms = reference_track->GetPreciseKeyframeIntervalDurationMs();
+		if (keyframe_interval_ms > 0.0)
+		{
+			std::shared_lock<std::shared_mutex> lock(_boundary_policy_map_lock);
+			for (const auto &[track_id, policy] : _boundary_policy_map)
+			{
+				(void)track_id;
+				auto target_duration_policy = std::dynamic_pointer_cast<bmff::TargetDurationBoundaryPolicy>(policy);
+				if (target_duration_policy != nullptr)
+				{
+					target_duration_policy->UpdateKeyframeInterval(keyframe_interval_ms);
+				}
+			}
+		}
+	}
+
 	// Get Packager
 	auto packager = GetPackager(track->GetId());
 	if (packager == nullptr)
