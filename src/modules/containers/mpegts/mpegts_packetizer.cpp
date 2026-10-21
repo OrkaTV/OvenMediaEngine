@@ -9,6 +9,7 @@
 #include "mpegts_packetizer.h"
 #include "mpegts_private.h"
 
+#include "descriptors/cea608_caption_service.h"
 #include "descriptors/metadata_pointer.h"
 #include "descriptors/metadata.h"
 
@@ -386,6 +387,18 @@ namespace mpegts
             
             es_info->_elementary_pid = elementary_pid;
             es_info->_es_info_length = 0; // descriptors length
+
+            if (track->GetMediaType() == cmn::MediaType::Video &&
+                track->GetCodecId() == cmn::MediaCodecId::H264)
+            {
+                auto descriptor = std::make_shared<Cea608CaptionServiceDescriptor>();
+                auto descriptor_data = descriptor->Build();
+                if (descriptor_data != nullptr)
+                {
+                    es_info->_es_info_length += descriptor_data->GetLength();
+                    es_info->_es_descriptors.emplace_back(descriptor);
+                }
+            }
 
             _pmt._es_info_list.push_back(es_info);
         }
