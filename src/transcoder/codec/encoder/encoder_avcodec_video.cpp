@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <thread>
 
+#include <modules/bitstream/h264/h264_sei_inserter.h>
+
 #include "../../transcoder_private.h"
 
 
@@ -470,6 +472,7 @@ bool AVCodecVideoEncoder::Initialize()
 
 void AVCodecVideoEncoder::Uninitialize()
 {
+	_a53_captions_by_pts.clear();
 	_codec.Flush();
 	_codec.Reset();
 }
@@ -506,6 +509,8 @@ EncodeResult AVCodecVideoEncoder::SendFrame(const std::shared_ptr<const MediaFra
 		return EncodeResult::Error();
 	}
 
+	CaptureA53Captions(frame);
+
 	return EncodeResult::NoOutput();
 }
 
@@ -538,6 +543,8 @@ EncodeResult AVCodecVideoEncoder::ReceivePacket()
 		return EncodeResult::Error();
 	}
 
+	RestoreA53Captions(media_packet);
+
 	if (GetRefTrack()->GetMediaType() == cmn::MediaType::Audio)
 	{
 		// If the pts value is under zero, the dash packetizer does not work. Drop it but keep draining.
@@ -560,3 +567,64 @@ EncodeResult AVCodecVideoEncoder::ReceivePacket()
 	return EncodeResult::Encoded(std::move(media_packet));
 }
 
+void AVCodecVideoEncoder::CaptureA53Captions(const std::shared_ptr<const MediaFrame> &frame)
+{
+	if (_codec_id != cmn::MediaCodecId::H264 || frame == nullptr)
+	{
+		return;
+	}
+
+	const auto *av_frame = static_cast<const AVFrame *>(frame->GetPrivData());
+	if (av_frame == nullptr)
+	{
+		return;
+	}
+
+	const auto *side_data = ::av_frame_get_side_data(av_frame, AV_FRAME_DATA_A53_CC);
+	if (side_data == nullptr || side_data->size == 0 || side_data->size % 3 != 0 ||
+		side_data->size > 31 * 3)
+	{
+		return;
+	}
+
+	_a53_captions_by_pts[frame->GetPts()] =
+		std::make_shared<ov::Data>(side_data->data, side_data->size, true);
+
+	constexpr size_t kMaxPendingCaptionFrames = 256;
+	while (_a53_captions_by_pts.size() > kMaxPendingCaptionFrames)
+	{
+		_a53_captions_by_pts.erase(_a53_captions_by_pts.begin());
+	}
+}
+
+void AVCodecVideoEncoder::RestoreA53Captions(const std::shared_ptr<MediaPacket> &packet)
+{
+	if (_codec_id != cmn::MediaCodecId::H264 || packet == nullptr)
+	{
+		return;
+	}
+
+	auto it = _a53_captions_by_pts.find(packet->GetPts());
+	if (it == _a53_captions_by_pts.end())
+	{
+		return;
+	}
+
+	const auto &captions = it->second;
+	auto payload = std::make_shared<ov::Data>(captions->GetLength() + 11);
+	const uint8_t header[] = {
+		0xB5, 0x00, 0x31, 'G', 'A', '9', '4', 0x03,
+		static_cast<uint8_t>(0x40 | (captions->GetLength() / 3)), 0x00
+	};
+	payload->Append(header, sizeof(header));
+	payload->Append(captions);
+	const uint8_t marker_bits = 0xFF;
+	payload->Append(&marker_bits, sizeof(marker_bits));
+
+	if (H264SeiInserter::InsertRegisteredUserData(packet, payload) == false)
+	{
+		logtw("Could not restore ATSC A/53 captions. pts(%" PRId64 ")", packet->GetPts());
+	}
+
+	_a53_captions_by_pts.erase(it);
+}

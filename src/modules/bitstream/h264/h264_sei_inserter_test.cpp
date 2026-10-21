@@ -524,7 +524,68 @@ namespace
 
 		return std::nullopt;
 	}
+
+	std::shared_ptr<const ov::Data> RegisteredUserDataOf(const std::shared_ptr<const ov::Data> &access_unit)
+	{
+		NalUnitFragmentHeader fragment_header;
+		if (NalUnitFragmentHeader::Parse(access_unit, fragment_header) == false)
+		{
+			return nullptr;
+		}
+
+		const auto *fragment = fragment_header.GetFragmentHeader();
+		const auto *buffer = access_unit->GetDataAs<uint8_t>();
+		for (size_t i = 0; i < fragment->GetCount(); i++)
+		{
+			auto nal = fragment->GetFragment(i);
+			if (nal.has_value() == false)
+			{
+				continue;
+			}
+
+			const size_t offset = std::get<0>(nal.value());
+			const size_t length = std::get<1>(nal.value());
+			if (static_cast<H264NalUnitType>(buffer[offset] & kH264NalUnitTypeMask) != H264NalUnitType::Sei)
+			{
+				continue;
+			}
+
+			auto rbsp = NalUnitInsertor::RemoveEmulationPreventionBytes(
+				std::make_shared<ov::Data>(buffer + offset + 1, length - 1));
+			std::vector<H264SEI::Message> messages;
+			if (H264SEI::SplitMessages(rbsp, messages) == false)
+			{
+				continue;
+			}
+
+			for (const auto &message : messages)
+			{
+				if (message.Is(H264SEI::PayloadType::USER_DATA_REGISTERED))
+				{
+					return message.payload;
+				}
+			}
+		}
+
+		return nullptr;
+	}
 }  // namespace
+
+TEST(H264SeiInserter, InsertsRegisteredA53UserData)
+{
+	const uint8_t a53_payload[] = {
+		0xB5, 0x00, 0x31, 'G', 'A', '9', '4', 0x03,
+		0x41, 0x00, 0xFC, 0x80, 0x80, 0xFF
+	};
+	auto packet = MakePacket(AccessUnit({AsData(kSps), AsData(kPps), AsData(kIdrSlice)}), 0);
+	auto payload = std::make_shared<ov::Data>(a53_payload, sizeof(a53_payload));
+
+	ASSERT_TRUE(H264SeiInserter::InsertRegisteredUserData(packet, payload));
+	auto inserted = RegisteredUserDataOf(packet->GetData());
+	ASSERT_NE(inserted, nullptr);
+	ASSERT_EQ(inserted->GetLength(), sizeof(a53_payload));
+	EXPECT_EQ(::memcmp(inserted->GetData(), a53_payload, sizeof(a53_payload)), 0);
+}
 
 // PatchSps() turns pic_struct_present_flag on, so the Replace path has to read the encoder's own
 // message with the pre-patch value. That memory must not outlive the SPS it came from: an encoder
