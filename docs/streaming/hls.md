@@ -120,6 +120,12 @@ If you use the default configuration, you can start streaming with the following
 
 `http://{OvenMediaEngine Host}:3333/{App Name}/{Stream Name}/master.m3u8?format=ts`
 
+H.264 elementary streams in MPEG-TS advertise an English CEA-608 Line 21 field-1
+caption service (`CC1`) in the Program Map Table. When the input H.264 carries
+ATSC A/53 caption data in SEI messages, native players such as Safari can
+discover and decode it. Streams without embedded caption data still advertise
+the service but display no caption text.
+
 We have prepared a test player that you can quickly see if OvenMediaEngine is working. Please refer to the [Test Player](../quick-start/test-player.md) for more information.
 
 ## Adaptive Bitrates Streaming (ABR)
