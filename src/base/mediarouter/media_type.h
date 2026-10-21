@@ -133,6 +133,7 @@ namespace cmn
 		NETINT,	   // HW
 		LIBVPX,	   // SW
 		LIBAOM,	   // SW
+		SVTAV1,	   // SW
 		FDKAAC,	   // SW
 		LIBOPUS,   // SW
 		NB
@@ -151,6 +152,7 @@ namespace cmn
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, NETINT);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, LIBVPX);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, LIBAOM);
+			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, SVTAV1);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, FDKAAC);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, LIBOPUS);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, NB);
@@ -521,6 +523,11 @@ namespace cmn
 		{
 			return cmn::MediaCodecModuleId::LIBAOM;
 		}
+		else if (name.HasSuffix("_SVTAV1") || name.HasSuffix("SVTAV1") ||
+				 name.HasSuffix("_SVT_AV1") || name.HasSuffix("SVT_AV1"))
+		{
+			return cmn::MediaCodecModuleId::SVTAV1;
+		}
 		else if (name.HasSuffix("_FDKAAC") || name.HasSuffix("FDKAAC"))
 		{
 			return cmn::MediaCodecModuleId::FDKAAC;
@@ -548,6 +555,7 @@ namespace cmn
 			OV_CASE_RETURN(MediaCodecModuleId::XMA, "xma");
 			OV_CASE_RETURN(MediaCodecModuleId::LIBVPX, "libvpx");
 			OV_CASE_RETURN(MediaCodecModuleId::LIBAOM, "libaom");
+			OV_CASE_RETURN(MediaCodecModuleId::SVTAV1, "svtav1");
 			OV_CASE_RETURN(MediaCodecModuleId::FDKAAC, "fdkaac");
 			OV_CASE_RETURN(MediaCodecModuleId::LIBOPUS, "libopus");
 			OV_CASE_RETURN(MediaCodecModuleId::X264, "x264");
