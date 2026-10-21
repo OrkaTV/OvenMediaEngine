@@ -140,6 +140,43 @@ namespace
 	};
 #endif
 
+#ifdef THIRDP_LIBSVTAV1_ENABLED
+	class SvtAv1TestEncoder : public AVCodecVideoEncoder
+	{
+	public:
+		SvtAv1TestEncoder()
+			: AVCodecVideoEncoder(info::Stream(StreamSourceType::Transcoder),
+								  cmn::MediaCodecId::Av1,
+								  cmn::MediaCodecModuleId::SVTAV1)
+		{
+		}
+
+		bool Open(const std::shared_ptr<MediaTrack> &track)
+		{
+			_track = track;
+			return Initialize();
+		}
+
+		EncodeResult Encode(const std::shared_ptr<const MediaFrame> &frame)
+		{
+			auto sent = SendFrame(frame, false);
+			if (sent.result == TranscodeResult::DataError)
+			{
+				return sent;
+			}
+			return ReceivePacket();
+		}
+
+		void Finish()
+		{
+			SendFrame(nullptr, false);
+			while (ReceivePacket().result == TranscodeResult::DataReady)
+			{
+			}
+		}
+	};
+#endif
+
 	constexpr int32_t kIntervalFrames = 30;
 	constexpr int64_t kFrameTicks = 3000;  // 1/90000 timebase, 30 fps
 
@@ -166,6 +203,51 @@ namespace
 			{
 				return true;
 			}
+		}
+		return false;
+	}
+
+	bool ContainsAv1ObuType(const uint8_t *data, size_t size, uint8_t expected_type)
+	{
+		size_t offset = 0;
+		while (offset < size)
+		{
+			const uint8_t header = data[offset++];
+			const uint8_t obu_type = (header >> 3) & 0x0F;
+			const bool extension_flag = (header & 0x04) != 0;
+			const bool has_size_field = (header & 0x02) != 0;
+			if ((header & 0x80) != 0 || !has_size_field || (extension_flag && offset >= size))
+			{
+				return false;
+			}
+			if (extension_flag)
+			{
+				offset++;
+			}
+
+			uint64_t payload_size = 0;
+			unsigned shift = 0;
+			uint8_t byte = 0;
+			do
+			{
+				if (offset >= size || shift >= 56)
+				{
+					return false;
+				}
+				byte = data[offset++];
+				payload_size |= static_cast<uint64_t>(byte & 0x7F) << shift;
+				shift += 7;
+			} while ((byte & 0x80) != 0);
+
+			if (payload_size > size - offset)
+			{
+				return false;
+			}
+			if (obu_type == expected_type)
+			{
+				return true;
+			}
+			offset += static_cast<size_t>(payload_size);
 		}
 		return false;
 	}
@@ -373,6 +455,85 @@ TEST(X265EncoderTest, EncodesHevcAnnexB)
 	EXPECT_TRUE(ContainsHevcNalType(data, result.packet->GetDataLength(), 20) ||
 				ContainsHevcNalType(data, result.packet->GetDataLength(), 19))
 		<< "missing IDR VCL NAL";
+}
+#endif
+
+TEST(SvtAv1EncoderTest, ModuleNameRoundTrips)
+{
+	EXPECT_EQ(cmn::GetCodecModuleIdByName("SVTAV1"), cmn::MediaCodecModuleId::SVTAV1);
+	EXPECT_EQ(cmn::GetCodecModuleIdByName("SVT_AV1"), cmn::MediaCodecModuleId::SVTAV1);
+	EXPECT_STREQ(cmn::GetCodecModuleIdString(cmn::MediaCodecModuleId::SVTAV1), "svtav1");
+}
+
+#ifdef THIRDP_LIBSVTAV1_ENABLED
+TEST(SvtAv1EncoderTest, DefaultAndExplicitFactoryUseSvtAv1)
+{
+	info::Stream stream(StreamSourceType::Transcoder);
+	auto default_encoder = TranscodeEncoder::Instantiate(
+		cmn::MediaCodecId::Av1, cmn::MediaCodecModuleId::DEFAULT, stream);
+	auto explicit_encoder = TranscodeEncoder::Instantiate(
+		cmn::MediaCodecId::Av1, cmn::MediaCodecModuleId::SVTAV1, stream);
+
+	ASSERT_NE(default_encoder, nullptr);
+	ASSERT_NE(explicit_encoder, nullptr);
+	EXPECT_EQ(default_encoder->GetModuleID(), cmn::MediaCodecModuleId::SVTAV1);
+	EXPECT_EQ(explicit_encoder->GetModuleID(), cmn::MediaCodecModuleId::SVTAV1);
+}
+
+TEST(SvtAv1EncoderTest, EncodesAv1Obu)
+{
+	auto track = MakeVideoTrack();
+	track->SetCodecId(cmn::MediaCodecId::Av1);
+	track->SetBitrateByConfig(500000);
+	track->SetResolution(64, 64);
+	track->SetBFrames(0);
+	track->SetThreadCount(1);
+	track->SetPreset("faster");
+	track->SetProfile("main");
+
+	SvtAv1TestEncoder encoder;
+	ASSERT_TRUE(encoder.Open(track));
+
+	EncodeResult result = EncodeResult::NoOutput();
+	for (int64_t pts = 0; pts < 4 && result.result != TranscodeResult::DataReady; pts++)
+	{
+		AVFrame *av_frame = ::av_frame_alloc();
+		ASSERT_NE(av_frame, nullptr);
+		av_frame->format = AV_PIX_FMT_YUV420P;
+		av_frame->width = 64;
+		av_frame->height = 64;
+		av_frame->pts = pts * kFrameTicks;
+		ASSERT_EQ(::av_frame_get_buffer(av_frame, 0), 0);
+		ASSERT_EQ(::av_frame_make_writable(av_frame), 0);
+		for (int plane = 0; plane < 3; plane++)
+		{
+			const int height = (plane == 0) ? 64 : 32;
+			const int width = (plane == 0) ? 64 : 32;
+			for (int y = 0; y < height; y++)
+			{
+				::memset(av_frame->data[plane] + y * av_frame->linesize[plane],
+						 plane == 0 ? 0x10 : 0x80, width);
+			}
+		}
+
+		auto frame = ffmpeg::compat::ToMediaFrame(cmn::MediaType::Video, av_frame);
+		::av_frame_free(&av_frame);
+		ASSERT_NE(frame, nullptr);
+		result = encoder.Encode(frame);
+		ASSERT_NE(result.result, TranscodeResult::DataError);
+	}
+
+	ASSERT_EQ(result.result, TranscodeResult::DataReady);
+	ASSERT_NE(result.packet, nullptr);
+	EXPECT_EQ(result.packet->GetBitstreamFormat(), cmn::BitstreamFormat::AV1_OBU);
+	ASSERT_GT(result.packet->GetDataLength(), 2U);
+	const auto *data = result.packet->GetData()->GetDataAs<uint8_t>();
+	EXPECT_TRUE(ContainsAv1ObuType(data, result.packet->GetDataLength(), 1))
+		<< "missing sequence header OBU";
+	EXPECT_TRUE(ContainsAv1ObuType(data, result.packet->GetDataLength(), 6) ||
+				ContainsAv1ObuType(data, result.packet->GetDataLength(), 3))
+		<< "missing frame OBU";
+	encoder.Finish();
 }
 #endif
 

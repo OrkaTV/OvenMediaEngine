@@ -49,6 +49,12 @@ namespace tc
 						   {cmn::MediaCodecId::Av1},
 						   true, true, true, false));
 
+#ifdef THIRDP_LIBSVTAV1_ENABLED
+		Register(info::CodecModule("SVT-AV1 Encoder", cmn::MediaType::Video, cmn::MediaCodecModuleId::SVTAV1, 0, "-",
+						   {cmn::MediaCodecId::Av1},
+						   false, false, true, false));
+#endif
+
 		// --------------------------------------------------------------------------
 		// Audio Codecs
 		// --------------------------------------------------------------------------

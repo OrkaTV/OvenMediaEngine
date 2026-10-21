@@ -476,6 +476,98 @@ bool AVCodecVideoEncoder::SetParamsLibAOM()
 	return true;
 }
 
+// ---------------------------------------------------------------------------
+// SVT-AV1
+// ---------------------------------------------------------------------------
+bool AVCodecVideoEncoder::SetParamsSvtAv1()
+{
+	_codec.SetBitrate(GetRefTrack()->GetBitrate());
+	_codec.SetRcBufferSize(static_cast<int>(_codec.GetBitrate() / 2));
+	_codec.SetSampleAspectRatio(cmn::Rational(1, 1));
+	_codec.SetTimeBase(GetRefTrack()->GetTimeBase());
+	_codec.SetFrameRate(cmn::Rational::FromDouble(GetRefTrack()->GetFrameRate()));
+	_codec.SetMaxBFrames(0);
+	_codec.SetPixelFormat(GetSupportVideoFormat());
+	auto resolution = GetRefTrack()->GetResolution();
+	_codec.SetWidth(resolution.width);
+	_codec.SetHeight(resolution.height);
+
+	auto key_frame_interval_type = GetRefTrack()->GetKeyFrameIntervalTypeByConfig();
+	if (key_frame_interval_type == cmn::KeyFrameIntervalType::TIME)
+	{
+		_codec.SetGopSize(static_cast<int32_t>(
+			GetRefTrack()->GetFrameRate() * static_cast<double>(GetRefTrack()->GetKeyFrameInterval()) / 1000));
+	}
+	else if (key_frame_interval_type == cmn::KeyFrameIntervalType::FRAME)
+	{
+		_codec.SetGopSize((GetRefTrack()->GetKeyFrameInterval() == 0) ?
+						  static_cast<int32_t>(_codec.GetFrameRate().GetExpr()) :
+						  GetRefTrack()->GetKeyFrameInterval());
+	}
+
+	const int thread_count = GetRefTrack()->GetThreadCount() < 0 ?
+							 std::min(std::max(4, static_cast<int>(std::max(1u, std::thread::hardware_concurrency())) / 3), 6) :
+							 std::clamp(GetRefTrack()->GetThreadCount(), 1, 6);
+	_codec.SetThreadCount(thread_count);
+
+	auto profile = GetRefTrack()->GetProfile().LowerCaseString();
+	if (profile.IsEmpty() || profile == "main")
+	{
+		_codec.SetOption("profile", "main");
+	}
+	else
+	{
+		logtw("Unsupported SVT-AV1 profile(%s) for 8-bit YUV420 input. Use main.", profile.CStr());
+		_codec.SetOption("profile", "main");
+	}
+
+	int preset = 9;
+	auto configured_preset = GetRefTrack()->GetPreset().LowerCaseString();
+	if (configured_preset == "slower")
+	{
+		preset = 5;
+	}
+	else if (configured_preset == "slow")
+	{
+		preset = 6;
+	}
+	else if (configured_preset == "medium")
+	{
+		preset = 7;
+	}
+	else if (configured_preset == "fast")
+	{
+		preset = 8;
+	}
+	else if (!configured_preset.IsEmpty() && configured_preset != "faster")
+	{
+		logtw("Unknown SVT-AV1 preset(%s). Use faster.", configured_preset.CStr());
+	}
+	_codec.SetOption("preset", preset);
+
+	const int lookahead = GetRefTrack()->GetLookaheadByConfig() >= 0 ?
+							  GetRefTrack()->GetLookaheadByConfig() :
+							  0;
+	ov::String extra_options = ov::String::FormatString(
+		"rc=2:irefresh-type=2:pred-struct=1:lookahead=%d:lp=%d:tune=1:buf-initial-sz=300:buf-optimal-sz=300",
+		lookahead, thread_count);
+	if (!GetRefTrack()->GetExtraEncoderOptionsByConfig().IsEmpty())
+	{
+		if (!GetRefTrack()->GetExtraEncoderOptionsByConfig().HasPrefix(":"))
+		{
+			extra_options += ":";
+		}
+		extra_options += GetRefTrack()->GetExtraEncoderOptionsByConfig();
+	}
+	_codec.SetOption("svtav1-params", extra_options.CStr());
+
+	logtd("opts: %s", ffmpeg::compat::GetAVOptionsString(_codec.GetPrivData()).CStr());
+
+	_bitstream_format = cmn::BitstreamFormat::AV1_OBU;
+	_packet_type = cmn::PacketType::RAW;
+	return true;
+}
+
 bool AVCodecVideoEncoder::OpenCodec()
 {
 	bool allocated = false;
@@ -486,7 +578,8 @@ bool AVCodecVideoEncoder::OpenCodec()
 	}
 	else if (_codec_id == cmn::MediaCodecId::Av1)
 	{
-		allocated = _codec.AllocEncoderByName("libaom-av1");
+		allocated = _codec.AllocEncoderByName(
+			_module_id == cmn::MediaCodecModuleId::SVTAV1 ? "libsvtav1" : "libaom-av1");
 	}
 	else if (_codec_id == cmn::MediaCodecId::H265)
 	{
@@ -515,7 +608,9 @@ bool AVCodecVideoEncoder::OpenCodec()
 			result = SetParamsVp8();
 			break;
 		case cmn::MediaCodecId::Av1:
-			result = SetParamsLibAOM();
+			result = _module_id == cmn::MediaCodecModuleId::SVTAV1 ?
+						 SetParamsSvtAv1() :
+						 SetParamsLibAOM();
 			break;
 		case cmn::MediaCodecId::H265:
 			result = SetParamsX265();

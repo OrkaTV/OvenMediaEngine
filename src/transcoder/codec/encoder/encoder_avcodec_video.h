@@ -17,7 +17,7 @@
 //   - H.264 : libx264 (X264) / libopenh264 (OPENH264, DEFAULT)
 //   - H.265 : libx265 (X265)
 //   - VP8   : libvpx (LIBVPX)
-//   - AV1   : libaom (libaom-av1)
+//   - AV1   : SVT-AV1 (libsvtav1) / libaom (libaom-av1)
 class AVCodecVideoEncoder : public TranscodeEncoder
 {
 public:
@@ -71,6 +71,7 @@ private:
 	bool SetParamsOpenH264();
 	bool SetParamsVp8();
 	bool SetParamsLibAOM();
+	bool SetParamsSvtAv1();
 
 	// ----- Members -----
 	cmn::MediaCodecId _codec_id;

@@ -14,6 +14,7 @@
 #   -DOME_HWACCEL_XMA=ON                   Enable Xilinx XMA FFmpeg support
 #   -DOME_ENABLE_X264=ON                   Enable libx264 (default ON)
 #   -DOME_ENABLE_X265=ON                   Enable libx265 (default ON)
+#   -DOME_ENABLE_SVT_AV1=ON                Enable SVT-AV1 (default ON)
 #   -DOME_ENABLE_JEMALLOC_LG_PAGE_MAX=ON   Build jemalloc with --with-lg-page=16 on aarch64/arm64
 #   -DOME_USE_CLANG=ON                     Install clang/lld and use as compiler (default ON)
 #   -DOME_WHISPER_STATIC=ON                Build Whisper as a static library (default OFF)
@@ -46,6 +47,10 @@ if(NOT DEFINED OME_ENABLE_X265)
     set(OME_ENABLE_X265 ON)
 endif()
 set(ENABLE_X265 ${OME_ENABLE_X265})
+if(NOT DEFINED OME_ENABLE_SVT_AV1)
+    set(OME_ENABLE_SVT_AV1 ON)
+endif()
+set(ENABLE_SVT_AV1 ${OME_ENABLE_SVT_AV1})
 if(NOT DEFINED OME_HWACCEL_NVIDIA)
     set(OME_HWACCEL_NVIDIA OFF)
 endif()
@@ -137,6 +142,7 @@ ome_parse_dep_version(OME_VER_SRT SRT_VERSION SRT_SOURCE_REF SRT_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_OPUS OPUS_VERSION OPUS_SOURCE_REF OPUS_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_VPX VPX_VERSION VPX_SOURCE_REF VPX_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_AOM AOM_VERSION AOM_SOURCE_REF AOM_HAS_OVERRIDE)
+ome_parse_dep_version(OME_VER_SVT_AV1 SVT_AV1_VERSION SVT_AV1_SOURCE_REF SVT_AV1_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_DAV1D DAV1D_VERSION DAV1D_SOURCE_REF DAV1D_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_FDKAAC FDKAAC_VERSION FDKAAC_SOURCE_REF FDKAAC_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_NASM NASM_VERSION NASM_SOURCE_REF NASM_HAS_OVERRIDE)
@@ -162,6 +168,7 @@ ome_select_archive_ref(SRT_ARCHIVE_REF "${SRT_HAS_OVERRIDE}" "${SRT_SOURCE_REF}"
 ome_select_archive_ref(OPUS_ARCHIVE_REF "${OPUS_HAS_OVERRIDE}" "${OPUS_SOURCE_REF}" "refs/tags/v${OPUS_SOURCE_REF}")
 ome_select_archive_ref(VPX_ARCHIVE_REF "${VPX_HAS_OVERRIDE}" "${VPX_SOURCE_REF}" "refs/tags/v${VPX_SOURCE_REF}")
 ome_select_archive_ref(AOM_ARCHIVE_REF "${AOM_HAS_OVERRIDE}" "${AOM_SOURCE_REF}/libaom-${AOM_SOURCE_REF}" "v${AOM_SOURCE_REF}/libaom-v${AOM_SOURCE_REF}")
+ome_select_archive_ref(SVT_AV1_ARCHIVE_REF "${SVT_AV1_HAS_OVERRIDE}" "${SVT_AV1_SOURCE_REF}" "v${SVT_AV1_SOURCE_REF}")
 ome_select_archive_ref(DAV1D_ARCHIVE_REF "${DAV1D_HAS_OVERRIDE}" "${DAV1D_SOURCE_REF}/dav1d-${DAV1D_SOURCE_REF}" "${DAV1D_SOURCE_REF}/dav1d-${DAV1D_SOURCE_REF}")
 ome_select_archive_ref(FDKAAC_ARCHIVE_REF "${FDKAAC_HAS_OVERRIDE}" "${FDKAAC_SOURCE_REF}" "v${FDKAAC_SOURCE_REF}")
 ome_select_archive_ref(NASM_ARCHIVE_REF "${NASM_HAS_OVERRIDE}" "${NASM_SOURCE_REF}" "refs/tags/nasm-${NASM_SOURCE_REF}")
@@ -184,6 +191,7 @@ set(SRT_SOURCE_URL "https://github.com/Haivision/srt/archive/${SRT_ARCHIVE_REF}.
 set(OPUS_SOURCE_URL "https://archive.mozilla.org/pub/opus/opus-${OPUS_SOURCE_REF}.tar.gz")
 set(VPX_SOURCE_URL "https://codeload.github.com/webmproject/libvpx/tar.gz/${VPX_ARCHIVE_REF}")
 set(AOM_SOURCE_URL "https://gitlab.com/webmproject/libaom/-/archive/${AOM_ARCHIVE_REF}.tar.gz")
+set(SVT_AV1_SOURCE_URL "https://gitlab.com/AOMediaCodec/SVT-AV1/-/archive/${SVT_AV1_ARCHIVE_REF}/SVT-AV1-${SVT_AV1_ARCHIVE_REF}.tar.gz")
 set(DAV1D_SOURCE_URL "https://code.videolan.org/videolan/dav1d/-/archive/${DAV1D_ARCHIVE_REF}.tar.gz")
 set(FDKAAC_SOURCE_URL "https://github.com/mstorsjo/fdk-aac/archive/${FDKAAC_ARCHIVE_REF}.tar.gz")
 set(NASM_SOURCE_URL "https://github.com/netwide-assembler/nasm/archive/${NASM_ARCHIVE_REF}.tar.gz")
@@ -465,6 +473,16 @@ cmake --build aom_build ${_J} &&
 sudo cmake --install aom_build --prefix ${PREFIX} && rm -rf ${TEMP_PATH}/aom
 ")
 
+# ---- SVT-AV1 ----
+# Requires NASM for x86 assembly optimizations; nasm is installed earlier in _targets.
+set(_install_libsvtav1 "
+mkdir -p ${TEMP_PATH}/svt-av1 && cd ${TEMP_PATH}/svt-av1 &&
+ome_fetch ${SVT_AV1_SOURCE_URL} &&
+cmake -S . -B svtav1_build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${PREFIX} -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_SHARED_LIBS=ON -DBUILD_APPS=OFF -DBUILD_TESTING=OFF -DEXCLUDE_HASH=ON &&
+cmake --build svtav1_build ${_J} &&
+sudo cmake --install svtav1_build --prefix ${PREFIX} && rm -rf ${TEMP_PATH}/svt-av1
+")
+
 # ---- dav1d (AV1 decoder) ----
 # dav1d builds only with meson (>= 0.54). Distro packages are older on some supported
 # platforms (Ubuntu 18.04/20.04), so a pinned release runs from its tarball with python3.
@@ -567,6 +585,11 @@ if(ENABLE_X265)
     string(APPEND _FFMPEG_ADDI_LIBS    " --enable-libx265")
     string(APPEND _FFMPEG_ADDI_ENCODER ",libx265")
     string(APPEND _FFMPEG_ADDI_LICENSE " --enable-gpl --enable-nonfree")
+endif()
+
+if(ENABLE_SVT_AV1)
+    string(APPEND _FFMPEG_ADDI_LIBS    " --enable-libsvtav1")
+    string(APPEND _FFMPEG_ADDI_ENCODER ",libsvtav1")
 endif()
 
 if(ENABLE_NVIDIA)
@@ -743,6 +766,7 @@ set(_targets
     libopenh264
     libvpx
     libaom
+    libsvtav1
     libdav1d
     libwebp
     fdk_aac
@@ -762,6 +786,9 @@ endif()
 if(ENABLE_X265)
     list(INSERT _targets 6 libx265)
 endif()
+if(NOT ENABLE_SVT_AV1)
+    list(REMOVE_ITEM _targets libsvtav1)
+endif()
 
 if(ENABLE_NVIDIA)
     list(APPEND _targets ffnvcodec)
@@ -778,6 +805,9 @@ if(DEFINED TARGET)
         if(ENABLE_X265)
             list(APPEND _ffmpeg_deps libx265)
         endif()
+        if(ENABLE_SVT_AV1)
+            list(APPEND _ffmpeg_deps libsvtav1)
+        endif()
         if(ENABLE_NVIDIA)
             list(APPEND _ffmpeg_deps ffnvcodec)
         endif()
@@ -785,8 +815,8 @@ if(DEFINED TARGET)
     elseif("${TARGET}" STREQUAL "redis-plus-plus")
         # TLS-enabled redis-plus-plus requires the hiredis SSL library.
         set(_targets hiredis redis-plus-plus)
-    elseif("${TARGET}" STREQUAL "libvpx" OR "${TARGET}" STREQUAL "libaom" OR "${TARGET}" STREQUAL "libdav1d")
-        # libvpx/libaom/libdav1d require nasm as assembler
+    elseif("${TARGET}" STREQUAL "libvpx" OR "${TARGET}" STREQUAL "libaom" OR "${TARGET}" STREQUAL "libsvtav1" OR "${TARGET}" STREQUAL "libdav1d")
+        # libvpx/libaom/libsvtav1/libdav1d require nasm as assembler
         set(_targets nasm ${TARGET})
     elseif("${TARGET}" STREQUAL "fdk_aac" OR "${TARGET}" STREQUAL "libx264" OR "${TARGET}" STREQUAL "libx265")
         # these also require nasm
