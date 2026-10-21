@@ -11,6 +11,8 @@
 #include "../../transcoder_encoder.h"
 #include <modules/ffmpeg/ffmpeg_codec.h>
 
+#include <map>
+
 // AVCodecVideoEncoder handles the software FFmpeg video encoders:
 //   - H.264 : libx264 (X264) / libopenh264 (OPENH264, DEFAULT)
 //   - VP8   : libvpx (LIBVPX)
@@ -57,6 +59,8 @@ protected:
 	void Uninitialize() override;
 	EncodeResult SendFrame(const std::shared_ptr<const MediaFrame> &frame, bool force_keyframe) override;
 	EncodeResult ReceivePacket() override;
+	void CaptureA53Captions(const std::shared_ptr<const MediaFrame> &frame);
+	void RestoreA53Captions(const std::shared_ptr<MediaPacket> &packet);
 
 private:
 	// ----- Internal helpers -----
@@ -72,5 +76,6 @@ private:
 	ffmpeg::FFmpegCodec _codec;
 	cmn::BitstreamFormat _bitstream_format = cmn::BitstreamFormat::Unknown;
 	cmn::PacketType _packet_type = cmn::PacketType::Unknown;
+	std::map<int64_t, std::shared_ptr<const ov::Data>> _a53_captions_by_pts;
 
 };

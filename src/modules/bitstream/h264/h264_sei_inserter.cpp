@@ -24,6 +24,10 @@ namespace
 	// Log prefix shared with the rest of MediaRouter and Transcoder
 	ov::String LogPrefix(const std::shared_ptr<info::Stream> &stream)
 	{
+		if (stream == nullptr)
+		{
+			return "[unknown stream]";
+		}
 		return ov::String::FormatString("[%s]", stream->GetUri().CStr());
 	}
 
@@ -452,6 +456,46 @@ bool H264SeiInserter::InsertUserData(const std::shared_ptr<info::Stream> &stream
 		FindFirstVclIndex(buffer, fragment).value_or(NalUnitInsertor::APPEND_TO_END);
 
 	return EmitSeiNal(stream, packet, fragment, rbsp, false, nal_index);
+}
+
+bool H264SeiInserter::InsertRegisteredUserData(const std::shared_ptr<MediaPacket> &packet,
+											   const std::shared_ptr<const ov::Data> &payload)
+{
+	if (packet == nullptr || packet->GetData() == nullptr || payload == nullptr ||
+		payload->GetLength() == 0 ||
+		(packet->GetBitstreamFormat() != cmn::BitstreamFormat::H264_ANNEXB &&
+		 packet->GetBitstreamFormat() != cmn::BitstreamFormat::H264_AVCC))
+	{
+		return false;
+	}
+
+	H264SEI sei;
+	sei.SetPayloadType(H264SEI::PayloadType::USER_DATA_REGISTERED);
+	sei.SetPayloadData(payload->Clone());
+
+	auto rbsp = sei.Serialize();
+	if (rbsp == nullptr)
+	{
+		return false;
+	}
+
+	NalUnitFragmentHeader fragment_header;
+	if (NalUnitFragmentHeader::Parse(packet->GetData(), fragment_header) == false)
+	{
+		return false;
+	}
+
+	const FragmentationHeader *fragment = fragment_header.GetFragmentHeader();
+	if (fragment == nullptr)
+	{
+		return false;
+	}
+
+	const auto *buffer = packet->GetData()->GetDataAs<uint8_t>();
+	const size_t nal_index =
+		FindFirstVclIndex(buffer, fragment).value_or(NalUnitInsertor::APPEND_TO_END);
+
+	return EmitSeiNal(nullptr, packet, fragment, rbsp, false, nal_index);
 }
 
 H264SeiInserter::SeiPlacement H264SeiInserter::DecideSeiPlacement(

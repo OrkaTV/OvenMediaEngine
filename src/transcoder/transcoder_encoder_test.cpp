@@ -8,8 +8,14 @@
 #include <gtest/gtest.h>
 
 #include <base/info/stream.h>
+#include <modules/ffmpeg/compat.h>
+#include <modules/ffmpeg/ffmpeg_filter_graph.h>
 
+#include "codec/encoder/encoder_avcodec_video.h"
 #include "transcoder_encoder.h"
+
+#include <algorithm>
+#include <cstring>
 
 // KeyframeGridRestore: after a pipeline disturbance (track change, codec
 // session reinitialization) the encoder forces one keyframe where the previous
@@ -87,6 +93,24 @@ namespace
 		}
 	};
 
+	class A53CaptionTestEncoder : public AVCodecVideoEncoder
+	{
+	public:
+		A53CaptionTestEncoder()
+			: AVCodecVideoEncoder(info::Stream(StreamSourceType::Transcoder),
+								  cmn::MediaCodecId::H264,
+								  cmn::MediaCodecModuleId::X264)
+		{
+		}
+
+		void Preserve(const std::shared_ptr<const MediaFrame> &frame,
+					  const std::shared_ptr<MediaPacket> &packet)
+		{
+			CaptureA53Captions(frame);
+			RestoreA53Captions(packet);
+		}
+	};
+
 	constexpr int32_t kIntervalFrames = 30;
 	constexpr int64_t kFrameTicks = 3000;  // 1/90000 timebase, 30 fps
 
@@ -104,6 +128,77 @@ namespace
 		return track;
 	}
 }  // namespace
+
+TEST(A53CaptionTest, RestoresGa94SeiByFramePts)
+{
+	AVFrame *av_frame = ::av_frame_alloc();
+	ASSERT_NE(av_frame, nullptr);
+	av_frame->pts = 9000;
+	auto *side_data = ::av_frame_new_side_data(av_frame, AV_FRAME_DATA_A53_CC, 3);
+	ASSERT_NE(side_data, nullptr);
+	const uint8_t cc_data[] = {0xFC, 0x80, 0x80};
+	::memcpy(side_data->data, cc_data, sizeof(cc_data));
+
+	auto frame = ffmpeg::compat::ToMediaFrame(cmn::MediaType::Video, av_frame);
+	::av_frame_free(&av_frame);
+	ASSERT_NE(frame, nullptr);
+
+	const uint8_t access_unit[] = {
+		0x00, 0x00, 0x00, 0x01,
+		0x65, 0x88, 0x84, 0x00, 0x21, 0xFF
+	};
+	auto packet_data = std::make_shared<ov::Data>(access_unit, sizeof(access_unit));
+	auto packet = std::make_shared<MediaPacket>(
+		cmn::MediaType::Video, 1, packet_data, 9000, 9000, 3000,
+		MediaPacketFlag::Key, cmn::BitstreamFormat::H264_ANNEXB, cmn::PacketType::NALU);
+
+	A53CaptionTestEncoder encoder;
+	encoder.Preserve(frame, packet);
+
+	const uint8_t signature[] = {0xB5, 0x00, 0x31, 'G', 'A', '9', '4', 0x03};
+	const auto *begin = packet->GetData()->GetDataAs<uint8_t>();
+	const auto *end = begin + packet->GetData()->GetLength();
+	EXPECT_NE(std::search(begin, end, std::begin(signature), std::end(signature)), end);
+}
+
+TEST(A53CaptionTest, SurvivesScaleFilter)
+{
+	ffmpeg::FFmpegFilterGraph graph;
+	ASSERT_TRUE(graph.Alloc(cmn::MediaType::Video, 1));
+	ASSERT_TRUE(graph.CreateBufferSource(
+		"video_size=16x16:pix_fmt=yuv420p:time_base=1/90000:pixel_aspect=1/1"));
+	ASSERT_TRUE(graph.CreateBufferSink());
+	ASSERT_TRUE(graph.Parse("scale=8x8:flags=bilinear"));
+	ASSERT_TRUE(graph.Config());
+
+	AVFrame *av_frame = ::av_frame_alloc();
+	ASSERT_NE(av_frame, nullptr);
+	av_frame->format = AV_PIX_FMT_YUV420P;
+	av_frame->width = 16;
+	av_frame->height = 16;
+	av_frame->pts = 9000;
+	ASSERT_EQ(::av_frame_get_buffer(av_frame, 0), 0);
+	auto *side_data = ::av_frame_new_side_data(av_frame, AV_FRAME_DATA_A53_CC, 3);
+	ASSERT_NE(side_data, nullptr);
+	const uint8_t cc_data[] = {0xFC, 0x80, 0x80};
+	::memcpy(side_data->data, cc_data, sizeof(cc_data));
+
+	auto input = ffmpeg::compat::ToMediaFrame(cmn::MediaType::Video, av_frame);
+	::av_frame_free(&av_frame);
+	ASSERT_NE(input, nullptr);
+	ASSERT_EQ(graph.PushFrame(input, false), ffmpeg::CodecResult::Ok);
+
+	auto [result, output] = graph.PullFrame();
+	ASSERT_EQ(result, ffmpeg::CodecResult::Ok);
+	ASSERT_NE(output, nullptr);
+	const auto *filtered = static_cast<const AVFrame *>(output->GetPrivData());
+	ASSERT_NE(filtered, nullptr);
+	const auto *filtered_side_data =
+		::av_frame_get_side_data(filtered, AV_FRAME_DATA_A53_CC);
+	ASSERT_NE(filtered_side_data, nullptr);
+	ASSERT_EQ(filtered_side_data->size, sizeof(cc_data));
+	EXPECT_EQ(::memcmp(filtered_side_data->data, cc_data, sizeof(cc_data)), 0);
+}
 
 TEST(KeyframeGridRestoreTest, FrameModeFiresAtNextCadencePosition)
 {
