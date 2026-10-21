@@ -388,7 +388,8 @@ namespace mpegts
             es_info->_elementary_pid = elementary_pid;
             es_info->_es_info_length = 0; // descriptors length
 
-            if (track->GetMediaType() == cmn::MediaType::Video &&
+            if (_config.enable_closed_captions &&
+                track->GetMediaType() == cmn::MediaType::Video &&
                 track->GetCodecId() == cmn::MediaCodecId::H264)
             {
                 auto descriptor = std::make_shared<Cea608CaptionServiceDescriptor>();

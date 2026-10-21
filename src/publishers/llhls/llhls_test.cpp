@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "llhls_chunklist.h"
+#include "llhls_master_playlist.h"
 
 namespace
 {
@@ -95,6 +96,40 @@ TEST(LLHlsChunklist, NoDiscontinuityTagsByDefault)
 
 	EXPECT_EQ(playlist.IndexOf("#EXT-X-DISCONTINUITY"), -1);
 	EXPECT_NE(playlist.IndexOf("#EXT-X-MAP:URI=\"init_1_video_key_llhls.m4s\""), -1);
+}
+
+TEST(LLHlsMasterPlaylist, AdvertisesClosedCaptionsWhenEnabled)
+{
+	LLHlsMasterPlaylist master;
+	master.SetClosedCaptionsEnabled(true);
+
+	auto track = CreateVideoTrack();
+	track->SetCodecId(cmn::MediaCodecId::H264);
+	track->SetBitrateByConfig(5000000);
+	track->SetResolution(1920, 1080);
+	track->SetFrameRateByConfig(30.0);
+
+	LLHlsMasterPlaylist::MediaInfo media;
+	media._group_id = "video";
+	media._type = cmn::MediaType::Video;
+	media._name = "video";
+	media._uri = "chunklist.m3u8";
+	media._track = track;
+	ASSERT_TRUE(master.AddMediaCandidate(media));
+	ASSERT_TRUE(master.AddStreamInfo("video", 0, "", ""));
+
+	auto playlist = master.ToString("", false, true);
+	EXPECT_NE(playlist.IndexOf("#EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS,GROUP-ID=\"cc\",NAME=\"English\","
+							   "LANGUAGE=\"en\",DEFAULT=YES,AUTOSELECT=YES,INSTREAM-ID=\"CC1\""), -1);
+	EXPECT_NE(playlist.IndexOf("CLOSED-CAPTIONS=\"cc\""), -1);
+}
+
+TEST(LLHlsMasterPlaylist, OmitsClosedCaptionsByDefault)
+{
+	LLHlsMasterPlaylist master;
+	auto playlist = master.ToString("", false, true);
+	EXPECT_EQ(playlist.IndexOf("CLOSED-CAPTIONS"), -1);
+	EXPECT_EQ(playlist.IndexOf("TYPE=CLOSED-CAPTIONS"), -1);
 }
 
 TEST(LLHlsChunklist, TrackVersionChangeInsertsTagAndNewMap)

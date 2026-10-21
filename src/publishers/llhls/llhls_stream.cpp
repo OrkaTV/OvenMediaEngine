@@ -659,6 +659,7 @@ std::shared_ptr<LLHlsMasterPlaylist> LLHlsStream::CreateMasterPlaylist(const std
 	auto default_query_value_hls_rewind = llhls_conf.GetDefaultQueryString().GetBoolValue("_HLS_rewind", kDefaultHlsRewind);
 
 	master_playlist->SetDefaultOptions(default_query_value_hls_legacy, default_query_value_hls_rewind);
+	master_playlist->SetClosedCaptionsEnabled(llhls_conf.IsClosedCaptionsEnabled());
 	master_playlist->SetChunkPath(chunk_path);
 	{
 		// The current key; a rotation updates it on the media thread

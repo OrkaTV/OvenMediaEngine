@@ -259,6 +259,7 @@
 							<SegmentDuration>6</SegmentDuration>
 							<!-- Use the largest whole-GOP duration that does not exceed SegmentDuration -->
 							<EnableMaxDuration>false</EnableMaxDuration>
+							<EnableClosedCaptions>false</EnableClosedCaptions>
 							<SegmentCount>10</SegmentCount>
 							<CrossDomains>
 								<Url>*</Url>
@@ -268,6 +269,7 @@
 						<HLS>
 							<SegmentCount>4</SegmentCount>
 							<SegmentDuration>4</SegmentDuration>
+							<EnableClosedCaptions>false</EnableClosedCaptions>
 							<!-- Use the largest whole-GOP duration that does not exceed SegmentDuration -->
 							<EnableMaxDuration>false</EnableMaxDuration>
 							<CrossDomains>
