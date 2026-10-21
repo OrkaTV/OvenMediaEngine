@@ -111,8 +111,64 @@ namespace
 		}
 	};
 
+#ifdef THIRDP_LIBX265_ENABLED
+	class X265TestEncoder : public AVCodecVideoEncoder
+	{
+	public:
+		X265TestEncoder()
+			: AVCodecVideoEncoder(info::Stream(StreamSourceType::Transcoder),
+								  cmn::MediaCodecId::H265,
+								  cmn::MediaCodecModuleId::X265)
+		{
+		}
+
+		bool Open(const std::shared_ptr<MediaTrack> &track)
+		{
+			_track = track;
+			return Initialize();
+		}
+
+		EncodeResult Encode(const std::shared_ptr<const MediaFrame> &frame)
+		{
+			auto sent = SendFrame(frame, false);
+			if (sent.result == TranscodeResult::DataError)
+			{
+				return sent;
+			}
+			return ReceivePacket();
+		}
+	};
+#endif
+
 	constexpr int32_t kIntervalFrames = 30;
 	constexpr int64_t kFrameTicks = 3000;  // 1/90000 timebase, 30 fps
+
+	bool ContainsHevcNalType(const uint8_t *data, size_t size, uint8_t expected_type)
+	{
+		for (size_t offset = 0; offset + 5 < size; offset++)
+		{
+			size_t header_offset = 0;
+			if (data[offset] == 0 && data[offset + 1] == 0 && data[offset + 2] == 1)
+			{
+				header_offset = offset + 3;
+			}
+			else if (offset + 6 < size && data[offset] == 0 && data[offset + 1] == 0 &&
+					 data[offset + 2] == 0 && data[offset + 3] == 1)
+			{
+				header_offset = offset + 4;
+			}
+			else
+			{
+				continue;
+			}
+
+			if (((data[header_offset] >> 1) & 0x3F) == expected_type)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 
 	std::shared_ptr<MediaTrack> MakeVideoTrack(cmn::KeyFrameIntervalType type = cmn::KeyFrameIntervalType::FRAME)
 	{
@@ -257,6 +313,68 @@ TEST(A53CaptionTest, SurvivesScaleFilter)
 	ASSERT_EQ(filtered_side_data->size, sizeof(cc_data));
 	EXPECT_EQ(::memcmp(filtered_side_data->data, cc_data, sizeof(cc_data)), 0);
 }
+
+TEST(X265EncoderTest, ModuleNameRoundTrips)
+{
+	EXPECT_EQ(cmn::GetCodecModuleIdByName("X265"), cmn::MediaCodecModuleId::X265);
+	EXPECT_STREQ(cmn::GetCodecModuleIdString(cmn::MediaCodecModuleId::X265), "x265");
+}
+
+#ifdef THIRDP_LIBX265_ENABLED
+TEST(X265EncoderTest, EncodesHevcAnnexB)
+{
+	auto track = MakeVideoTrack();
+	track->SetCodecId(cmn::MediaCodecId::H265);
+	track->SetBitrateByConfig(500000);
+	track->SetResolution(64, 64);
+	track->SetBFrames(0);
+	track->SetThreadCount(1);
+	track->SetPreset("faster");
+	track->SetProfile("main");
+
+	X265TestEncoder encoder;
+	ASSERT_TRUE(encoder.Open(track));
+
+	AVFrame *av_frame = ::av_frame_alloc();
+	ASSERT_NE(av_frame, nullptr);
+	av_frame->format = AV_PIX_FMT_YUV420P;
+	av_frame->width = 64;
+	av_frame->height = 64;
+	av_frame->pts = 0;
+	ASSERT_EQ(::av_frame_get_buffer(av_frame, 0), 0);
+	ASSERT_EQ(::av_frame_make_writable(av_frame), 0);
+	for (int plane = 0; plane < 3; plane++)
+	{
+		const int height = (plane == 0) ? 64 : 32;
+		const int width = (plane == 0) ? 64 : 32;
+		for (int y = 0; y < height; y++)
+		{
+			::memset(av_frame->data[plane] + y * av_frame->linesize[plane],
+					 plane == 0 ? 0x10 : 0x80, width);
+		}
+	}
+
+	auto frame = ffmpeg::compat::ToMediaFrame(cmn::MediaType::Video, av_frame);
+	::av_frame_free(&av_frame);
+	ASSERT_NE(frame, nullptr);
+
+	auto result = encoder.Encode(frame);
+	ASSERT_EQ(result.result, TranscodeResult::DataReady);
+	ASSERT_NE(result.packet, nullptr);
+	EXPECT_EQ(result.packet->GetBitstreamFormat(), cmn::BitstreamFormat::H265_ANNEXB);
+	ASSERT_GE(result.packet->GetDataLength(), 6U);
+	const auto *data = result.packet->GetData()->GetDataAs<uint8_t>();
+	EXPECT_EQ(data[0], 0x00);
+	EXPECT_EQ(data[1], 0x00);
+	EXPECT_TRUE((data[2] == 0x01) || (data[2] == 0x00 && data[3] == 0x01));
+	EXPECT_TRUE(ContainsHevcNalType(data, result.packet->GetDataLength(), 32)) << "missing VPS";
+	EXPECT_TRUE(ContainsHevcNalType(data, result.packet->GetDataLength(), 33)) << "missing SPS";
+	EXPECT_TRUE(ContainsHevcNalType(data, result.packet->GetDataLength(), 34)) << "missing PPS";
+	EXPECT_TRUE(ContainsHevcNalType(data, result.packet->GetDataLength(), 20) ||
+				ContainsHevcNalType(data, result.packet->GetDataLength(), 19))
+		<< "missing IDR VCL NAL";
+}
+#endif
 
 TEST(KeyframeGridRestoreTest, FrameModeFiresAtNextCadencePosition)
 {

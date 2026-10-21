@@ -173,6 +173,10 @@ std::shared_ptr<TranscodeEncoder> TranscodeEncoder::Instantiate(
 	{
 		switch (module_id)
 		{
+#ifdef THIRDP_LIBX265_ENABLED
+			case cmn::MediaCodecModuleId::DEFAULT:
+			case cmn::MediaCodecModuleId::X265: return std::make_shared<AVCodecVideoEncoder>(stream_info, codec_id, cmn::MediaCodecModuleId::X265);
+#endif
 			default: break;
 		}
 	}

@@ -13,6 +13,7 @@
 #   -DOME_HWACCEL_NVIDIA=ON                Enable NVIDIA nv-codec-headers + CUDA FFmpeg/Whisper support
 #   -DOME_HWACCEL_XMA=ON                   Enable Xilinx XMA FFmpeg support
 #   -DOME_ENABLE_X264=ON                   Enable libx264 (default ON)
+#   -DOME_ENABLE_X265=ON                   Enable libx265 (default ON)
 #   -DOME_ENABLE_JEMALLOC_LG_PAGE_MAX=ON   Build jemalloc with --with-lg-page=16 on aarch64/arm64
 #   -DOME_USE_CLANG=ON                     Install clang/lld and use as compiler (default ON)
 #   -DOME_WHISPER_STATIC=ON                Build Whisper as a static library (default OFF)
@@ -41,6 +42,10 @@ if(NOT DEFINED OME_ENABLE_X264)
 endif()
 # Internal alias used throughout this file
 set(ENABLE_X264 ${OME_ENABLE_X264})
+if(NOT DEFINED OME_ENABLE_X265)
+    set(OME_ENABLE_X265 ON)
+endif()
+set(ENABLE_X265 ${OME_ENABLE_X265})
 if(NOT DEFINED OME_HWACCEL_NVIDIA)
     set(OME_HWACCEL_NVIDIA OFF)
 endif()
@@ -144,6 +149,7 @@ ome_parse_dep_version(OME_VER_HIREDIS HIREDIS_VERSION HIREDIS_SOURCE_REF HIREDIS
 ome_parse_dep_version(OME_VER_REDIS_PLUS_PLUS REDIS_PLUS_PLUS_VERSION REDIS_PLUS_PLUS_SOURCE_REF REDIS_PLUS_PLUS_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_NVCC_HDR NVCC_HDR_VERSION NVCC_HDR_SOURCE_REF NVCC_HDR_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_X264 X264_VERSION X264_SOURCE_REF X264_HAS_OVERRIDE)
+ome_parse_dep_version(OME_VER_X265 X265_VERSION X265_SOURCE_REF X265_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_WEBP WEBP_VERSION WEBP_SOURCE_REF WEBP_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_SPDLOG SPDLOG_VERSION SPDLOG_SOURCE_REF SPDLOG_HAS_OVERRIDE)
 ome_parse_dep_version(OME_VER_WHISPER WHISPER_VERSION WHISPER_SOURCE_REF WHISPER_HAS_OVERRIDE)
@@ -167,6 +173,7 @@ ome_select_archive_ref(HIREDIS_ARCHIVE_REF "${HIREDIS_HAS_OVERRIDE}" "${HIREDIS_
 ome_select_archive_ref(REDIS_PLUS_PLUS_ARCHIVE_REF "${REDIS_PLUS_PLUS_HAS_OVERRIDE}" "${REDIS_PLUS_PLUS_SOURCE_REF}" "refs/tags/${REDIS_PLUS_PLUS_SOURCE_REF}")
 ome_select_archive_ref(NVCC_HDR_ARCHIVE_REF "${NVCC_HDR_HAS_OVERRIDE}" "${NVCC_HDR_SOURCE_REF}" "refs/tags/n${NVCC_HDR_SOURCE_REF}")
 ome_select_archive_ref(X264_ARCHIVE_REF "${X264_HAS_OVERRIDE}" "${X264_SOURCE_REF}/x264-${X264_SOURCE_REF}" "master/x264-${X264_SOURCE_REF}")
+ome_select_archive_ref(X265_ARCHIVE_REF "${X265_HAS_OVERRIDE}" "${X265_SOURCE_REF}" "refs/tags/${X265_SOURCE_REF}")
 ome_select_archive_ref(WEBP_ARCHIVE_REF "${WEBP_HAS_OVERRIDE}" "${WEBP_SOURCE_REF}" "refs/tags/v${WEBP_SOURCE_REF}")
 ome_select_archive_ref(SPDLOG_ARCHIVE_REF "${SPDLOG_HAS_OVERRIDE}" "${SPDLOG_SOURCE_REF}" "refs/tags/v${SPDLOG_SOURCE_REF}")
 ome_select_archive_ref(WHISPER_ARCHIVE_REF "${WHISPER_HAS_OVERRIDE}" "${WHISPER_SOURCE_REF}" "refs/tags/v${WHISPER_SOURCE_REF}")
@@ -190,6 +197,7 @@ set(REDIS_PLUS_PLUS_SOURCE_URL "https://github.com/sewenew/redis-plus-plus/archi
 set(NVCC_HDR_SOURCE_URL "https://github.com/FFmpeg/nv-codec-headers/releases/download/n${NVCC_HDR_SOURCE_REF}/nv-codec-headers-${NVCC_HDR_SOURCE_REF}.tar.gz")
 # TODO: restore the official https://code.videolan.org/videolan/x264/-/archive/${X264_ARCHIVE_REF}.tar.bz2
 set(X264_SOURCE_URL "https://github.com/mirror/x264/archive/${X264_SOURCE_REF}.tar.gz")
+set(X265_SOURCE_URL "https://github.com/Multicorewareinc/x265/archive/${X265_ARCHIVE_REF}.tar.gz")
 set(WEBP_SOURCE_URL "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-${WEBP_SOURCE_REF}.tar.gz")
 set(SPDLOG_SOURCE_URL "https://github.com/gabime/spdlog/archive/${SPDLOG_ARCHIVE_REF}.tar.gz")
 set(WHISPER_SOURCE_URL "https://github.com/ggml-org/whisper.cpp/archive/${WHISPER_ARCHIVE_REF}.tar.gz")
@@ -503,6 +511,28 @@ ome_fetch ${X264_SOURCE_URL} &&
 make ${_J} && sudo make install && rm -rf ${TEMP_PATH}/x264
 ")
 
+# ---- x265 (optional) ----
+set(_X265_VERSION_FIX "")
+if("${X265_SOURCE_REF}" STREQUAL "4.3")
+    # The 4.3 release archive carries stale 4.2 metadata in x265Version.txt. The annotated
+    # release tag is authoritative; correct only the generated library/pkg-config version.
+    set(_X265_VERSION_FIX "
+sed -i \
+    -e 's/^repositorychangeset:.*/repositorychangeset: e9b88125dc21393b3fd8d68e98083bdfb89778a8/' \
+    -e 's/^releasetagdistance:.*/releasetagdistance: 0/' \
+    -e 's/^releasetag:.*/releasetag: 4.3/' \
+    x265Version.txt &&
+")
+endif()
+set(_install_libx265 "
+mkdir -p ${TEMP_PATH}/x265 && cd ${TEMP_PATH}/x265 &&
+ome_fetch ${X265_SOURCE_URL} &&
+${_X265_VERSION_FIX}
+cmake -S source -B build -DCMAKE_INSTALL_PREFIX=${PREFIX} -DCMAKE_INSTALL_LIBDIR=lib -DENABLE_SHARED=ON -DENABLE_CLI=OFF &&
+cmake --build build ${_J} &&
+sudo cmake --install build --prefix ${PREFIX} && rm -rf ${TEMP_PATH}/x265
+")
+
 # ---- nv-codec-headers (optional) ----
 set(_install_ffnvcodec "
 mkdir -p ${TEMP_PATH}/nvcc-hdr && cd ${TEMP_PATH}/nvcc-hdr &&
@@ -530,6 +560,12 @@ endif()
 if(ENABLE_X264)
     string(APPEND _FFMPEG_ADDI_LIBS    " --enable-libx264")
     string(APPEND _FFMPEG_ADDI_ENCODER ",libx264")
+    string(APPEND _FFMPEG_ADDI_LICENSE " --enable-gpl --enable-nonfree")
+endif()
+
+if(ENABLE_X265)
+    string(APPEND _FFMPEG_ADDI_LIBS    " --enable-libx265")
+    string(APPEND _FFMPEG_ADDI_ENCODER ",libx265")
     string(APPEND _FFMPEG_ADDI_LICENSE " --enable-gpl --enable-nonfree")
 endif()
 
@@ -723,6 +759,9 @@ set(_targets
 if(ENABLE_X264)
     list(INSERT _targets 5 libx264)
 endif()
+if(ENABLE_X265)
+    list(INSERT _targets 6 libx265)
+endif()
 
 if(ENABLE_NVIDIA)
     list(APPEND _targets ffnvcodec)
@@ -736,6 +775,9 @@ if(DEFINED TARGET)
         if(ENABLE_X264)
             list(APPEND _ffmpeg_deps libx264)
         endif()
+        if(ENABLE_X265)
+            list(APPEND _ffmpeg_deps libx265)
+        endif()
         if(ENABLE_NVIDIA)
             list(APPEND _ffmpeg_deps ffnvcodec)
         endif()
@@ -746,7 +788,7 @@ if(DEFINED TARGET)
     elseif("${TARGET}" STREQUAL "libvpx" OR "${TARGET}" STREQUAL "libaom" OR "${TARGET}" STREQUAL "libdav1d")
         # libvpx/libaom/libdav1d require nasm as assembler
         set(_targets nasm ${TARGET})
-    elseif("${TARGET}" STREQUAL "fdk_aac" OR "${TARGET}" STREQUAL "libx264")
+    elseif("${TARGET}" STREQUAL "fdk_aac" OR "${TARGET}" STREQUAL "libx264" OR "${TARGET}" STREQUAL "libx265")
         # these also require nasm
         set(_targets nasm ${TARGET})
     else()

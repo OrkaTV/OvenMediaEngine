@@ -35,6 +35,12 @@ namespace tc
 						   false, false, true, false));
 #endif
 
+#ifdef THIRDP_LIBX265_ENABLED
+		Register(info::CodecModule("x265 HEVC Codec", cmn::MediaType::Video, cmn::MediaCodecModuleId::X265, 0, "-",
+						   {cmn::MediaCodecId::H265},
+						   false, false, true, false));
+#endif
+
 		Register(info::CodecModule("WebM VP8/VP9 Codec SDK", cmn::MediaType::Video, cmn::MediaCodecModuleId::LIBVPX, 0, "-",
 						   {cmn::MediaCodecId::Vp8},
 						   true, false, true, false));
