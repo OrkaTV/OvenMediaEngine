@@ -13,6 +13,10 @@
 #include <algorithm>
 #include <thread>
 
+#include <modules/bitstream/av1/av1_metadata_inserter.h>
+#include <modules/bitstream/h264/h264_sei_inserter.h>
+#include <modules/bitstream/h265/h265_sei_inserter.h>
+
 #include "../../transcoder_private.h"
 
 
@@ -128,6 +132,85 @@ bool AVCodecVideoEncoder::SetParamsX264()
 	_bitstream_format = cmn::BitstreamFormat::H264_ANNEXB;
 	_packet_type = cmn::PacketType::NALU;
 
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// libx265
+// ---------------------------------------------------------------------------
+bool AVCodecVideoEncoder::SetParamsX265()
+{
+	_codec.SetBitrate(GetRefTrack()->GetBitrate());
+	_codec.SetRcMinRate(_codec.GetBitrate());
+	_codec.SetRcMaxRate(_codec.GetBitrate());
+	_codec.SetRcBufferSize(static_cast<int>(_codec.GetBitrate() / 2));
+	_codec.SetFrameRate(cmn::Rational::FromDouble(GetRefTrack()->GetFrameRate()));
+	_codec.SetSampleAspectRatio(cmn::Rational(1, 1));
+	_codec.SetTicksPerFrame(1);
+	_codec.SetTimeBase(GetRefTrack()->GetTimeBase());
+	_codec.SetMaxBFrames(GetRefTrack()->GetBFrames());
+	_codec.SetPixelFormat(GetSupportVideoFormat());
+	auto resolution = GetRefTrack()->GetResolution();
+	_codec.SetWidth(resolution.width);
+	_codec.SetHeight(resolution.height);
+
+	auto key_frame_interval_type = GetRefTrack()->GetKeyFrameIntervalTypeByConfig();
+	if (key_frame_interval_type == cmn::KeyFrameIntervalType::TIME)
+	{
+		_codec.SetGopSize((int32_t)(GetRefTrack()->GetFrameRate() * (double)GetRefTrack()->GetKeyFrameInterval() / 1000));
+	}
+	else if (key_frame_interval_type == cmn::KeyFrameIntervalType::FRAME)
+	{
+		_codec.SetGopSize((GetRefTrack()->GetKeyFrameInterval() == 0) ?
+						  (int32_t)_codec.GetFrameRate().GetExpr() :
+						  GetRefTrack()->GetKeyFrameInterval());
+	}
+
+	const int thread_count = GetRefTrack()->GetThreadCount() < 0 ?
+							 std::min(std::max(4, static_cast<int>(std::max(1u, std::thread::hardware_concurrency())) / 3), 8) :
+							 GetRefTrack()->GetThreadCount();
+	_codec.SetThreadCount(thread_count);
+
+	auto profile = GetRefTrack()->GetProfile().LowerCaseString();
+	if (profile.IsEmpty() || profile == "main")
+	{
+		_codec.SetOption("profile", "main");
+	}
+	else
+	{
+		logtw("Unsupported libx265 profile(%s) for 8-bit YUV420 input. Use main.", profile.CStr());
+		_codec.SetOption("profile", "main");
+	}
+
+	auto preset = GetRefTrack()->GetPreset().LowerCaseString();
+	if (preset == "slower" || preset == "slow" || preset == "medium" ||
+		preset == "fast" || preset == "faster")
+	{
+		_codec.SetOption("preset", preset.CStr());
+	}
+	else
+	{
+		_codec.SetOption("preset", "faster");
+	}
+	_codec.SetOption("tune", "zerolatency");
+
+	ov::String extra_options = ov::String::FormatString(
+		"bframes=%d:scenecut=0:keyint=%d:min-keyint=%d:open-gop=0:repeat-headers=1:pools=%d",
+		GetRefTrack()->GetBFrames(), _codec.GetGopSize(), _codec.GetGopSize(), thread_count);
+	if (!GetRefTrack()->GetExtraEncoderOptionsByConfig().IsEmpty())
+	{
+		if (!GetRefTrack()->GetExtraEncoderOptionsByConfig().HasPrefix(":"))
+		{
+			extra_options += ":";
+		}
+		extra_options += GetRefTrack()->GetExtraEncoderOptionsByConfig();
+	}
+	_codec.SetOption("x265-params", extra_options.CStr());
+
+	logtd("opts: %s", ffmpeg::compat::GetAVOptionsString(_codec.GetPrivData()).CStr());
+
+	_bitstream_format = cmn::BitstreamFormat::H265_ANNEXB;
+	_packet_type = cmn::PacketType::NALU;
 	return true;
 }
 
@@ -393,6 +476,98 @@ bool AVCodecVideoEncoder::SetParamsLibAOM()
 	return true;
 }
 
+// ---------------------------------------------------------------------------
+// SVT-AV1
+// ---------------------------------------------------------------------------
+bool AVCodecVideoEncoder::SetParamsSvtAv1()
+{
+	_codec.SetBitrate(GetRefTrack()->GetBitrate());
+	_codec.SetRcBufferSize(static_cast<int>(_codec.GetBitrate() / 2));
+	_codec.SetSampleAspectRatio(cmn::Rational(1, 1));
+	_codec.SetTimeBase(GetRefTrack()->GetTimeBase());
+	_codec.SetFrameRate(cmn::Rational::FromDouble(GetRefTrack()->GetFrameRate()));
+	_codec.SetMaxBFrames(0);
+	_codec.SetPixelFormat(GetSupportVideoFormat());
+	auto resolution = GetRefTrack()->GetResolution();
+	_codec.SetWidth(resolution.width);
+	_codec.SetHeight(resolution.height);
+
+	auto key_frame_interval_type = GetRefTrack()->GetKeyFrameIntervalTypeByConfig();
+	if (key_frame_interval_type == cmn::KeyFrameIntervalType::TIME)
+	{
+		_codec.SetGopSize(static_cast<int32_t>(
+			GetRefTrack()->GetFrameRate() * static_cast<double>(GetRefTrack()->GetKeyFrameInterval()) / 1000));
+	}
+	else if (key_frame_interval_type == cmn::KeyFrameIntervalType::FRAME)
+	{
+		_codec.SetGopSize((GetRefTrack()->GetKeyFrameInterval() == 0) ?
+						  static_cast<int32_t>(_codec.GetFrameRate().GetExpr()) :
+						  GetRefTrack()->GetKeyFrameInterval());
+	}
+
+	const int thread_count = GetRefTrack()->GetThreadCount() < 0 ?
+							 std::min(std::max(4, static_cast<int>(std::max(1u, std::thread::hardware_concurrency())) / 3), 6) :
+							 std::clamp(GetRefTrack()->GetThreadCount(), 1, 6);
+	_codec.SetThreadCount(thread_count);
+
+	auto profile = GetRefTrack()->GetProfile().LowerCaseString();
+	if (profile.IsEmpty() || profile == "main")
+	{
+		_codec.SetOption("profile", "main");
+	}
+	else
+	{
+		logtw("Unsupported SVT-AV1 profile(%s) for 8-bit YUV420 input. Use main.", profile.CStr());
+		_codec.SetOption("profile", "main");
+	}
+
+	int preset = 9;
+	auto configured_preset = GetRefTrack()->GetPreset().LowerCaseString();
+	if (configured_preset == "slower")
+	{
+		preset = 5;
+	}
+	else if (configured_preset == "slow")
+	{
+		preset = 6;
+	}
+	else if (configured_preset == "medium")
+	{
+		preset = 7;
+	}
+	else if (configured_preset == "fast")
+	{
+		preset = 8;
+	}
+	else if (!configured_preset.IsEmpty() && configured_preset != "faster")
+	{
+		logtw("Unknown SVT-AV1 preset(%s). Use faster.", configured_preset.CStr());
+	}
+	_codec.SetOption("preset", preset);
+
+	const int lookahead = GetRefTrack()->GetLookaheadByConfig() >= 0 ?
+							  GetRefTrack()->GetLookaheadByConfig() :
+							  0;
+	ov::String extra_options = ov::String::FormatString(
+		"rc=2:irefresh-type=2:pred-struct=1:lookahead=%d:lp=%d:tune=1:buf-initial-sz=300:buf-optimal-sz=300",
+		lookahead, thread_count);
+	if (!GetRefTrack()->GetExtraEncoderOptionsByConfig().IsEmpty())
+	{
+		if (!GetRefTrack()->GetExtraEncoderOptionsByConfig().HasPrefix(":"))
+		{
+			extra_options += ":";
+		}
+		extra_options += GetRefTrack()->GetExtraEncoderOptionsByConfig();
+	}
+	_codec.SetOption("svtav1-params", extra_options.CStr());
+
+	logtd("opts: %s", ffmpeg::compat::GetAVOptionsString(_codec.GetPrivData()).CStr());
+
+	_bitstream_format = cmn::BitstreamFormat::AV1_OBU;
+	_packet_type = cmn::PacketType::RAW;
+	return true;
+}
+
 bool AVCodecVideoEncoder::OpenCodec()
 {
 	bool allocated = false;
@@ -403,7 +578,12 @@ bool AVCodecVideoEncoder::OpenCodec()
 	}
 	else if (_codec_id == cmn::MediaCodecId::Av1)
 	{
-		allocated = _codec.AllocEncoderByName("libaom-av1");
+		allocated = _codec.AllocEncoderByName(
+			_module_id == cmn::MediaCodecModuleId::SVTAV1 ? "libsvtav1" : "libaom-av1");
+	}
+	else if (_codec_id == cmn::MediaCodecId::H265)
+	{
+		allocated = _codec.AllocEncoderByName("libx265");
 	}
 	else if (_module_id == cmn::MediaCodecModuleId::X264)
 	{
@@ -428,7 +608,12 @@ bool AVCodecVideoEncoder::OpenCodec()
 			result = SetParamsVp8();
 			break;
 		case cmn::MediaCodecId::Av1:
-			result = SetParamsLibAOM();
+			result = _module_id == cmn::MediaCodecModuleId::SVTAV1 ?
+						 SetParamsSvtAv1() :
+						 SetParamsLibAOM();
+			break;
+		case cmn::MediaCodecId::H265:
+			result = SetParamsX265();
 			break;
 		default:
 			if (_module_id == cmn::MediaCodecModuleId::X264)
@@ -470,6 +655,7 @@ bool AVCodecVideoEncoder::Initialize()
 
 void AVCodecVideoEncoder::Uninitialize()
 {
+	_a53_captions_by_pts.clear();
 	_codec.Flush();
 	_codec.Reset();
 }
@@ -506,6 +692,8 @@ EncodeResult AVCodecVideoEncoder::SendFrame(const std::shared_ptr<const MediaFra
 		return EncodeResult::Error();
 	}
 
+	CaptureA53Captions(frame);
+
 	return EncodeResult::NoOutput();
 }
 
@@ -538,6 +726,8 @@ EncodeResult AVCodecVideoEncoder::ReceivePacket()
 		return EncodeResult::Error();
 	}
 
+	RestoreA53Captions(media_packet);
+
 	if (GetRefTrack()->GetMediaType() == cmn::MediaType::Audio)
 	{
 		// If the pts value is under zero, the dash packetizer does not work. Drop it but keep draining.
@@ -560,3 +750,84 @@ EncodeResult AVCodecVideoEncoder::ReceivePacket()
 	return EncodeResult::Encoded(std::move(media_packet));
 }
 
+void AVCodecVideoEncoder::CaptureA53Captions(const std::shared_ptr<const MediaFrame> &frame)
+{
+	if ((_codec_id != cmn::MediaCodecId::H264 &&
+		 _codec_id != cmn::MediaCodecId::H265 &&
+		 _codec_id != cmn::MediaCodecId::Av1) ||
+		frame == nullptr)
+	{
+		return;
+	}
+
+	const auto *av_frame = static_cast<const AVFrame *>(frame->GetPrivData());
+	if (av_frame == nullptr)
+	{
+		return;
+	}
+
+	const auto *side_data = ::av_frame_get_side_data(av_frame, AV_FRAME_DATA_A53_CC);
+	if (side_data == nullptr || side_data->size == 0 || side_data->size % 3 != 0 ||
+		side_data->size > 31 * 3)
+	{
+		return;
+	}
+
+	_a53_captions_by_pts[frame->GetPts()] =
+		std::make_shared<ov::Data>(side_data->data, side_data->size, true);
+
+	constexpr size_t kMaxPendingCaptionFrames = 256;
+	while (_a53_captions_by_pts.size() > kMaxPendingCaptionFrames)
+	{
+		_a53_captions_by_pts.erase(_a53_captions_by_pts.begin());
+	}
+}
+
+void AVCodecVideoEncoder::RestoreA53Captions(const std::shared_ptr<MediaPacket> &packet)
+{
+	if (packet == nullptr)
+	{
+		return;
+	}
+
+	auto it = _a53_captions_by_pts.find(packet->GetPts());
+	if (it == _a53_captions_by_pts.end())
+	{
+		return;
+	}
+
+	const auto &captions = it->second;
+	auto payload = std::make_shared<ov::Data>(captions->GetLength() + 11);
+	const uint8_t header[] = {
+		0xB5, 0x00, 0x31, 'G', 'A', '9', '4', 0x03,
+		static_cast<uint8_t>(0x40 | (captions->GetLength() / 3)), 0x00
+	};
+	payload->Append(header, sizeof(header));
+	payload->Append(captions);
+	const uint8_t marker_bits = 0xFF;
+	payload->Append(&marker_bits, sizeof(marker_bits));
+
+	bool inserted = false;
+	switch (_codec_id)
+	{
+		case cmn::MediaCodecId::H264:
+			inserted = H264SeiInserter::InsertRegisteredUserData(packet, payload);
+			break;
+		case cmn::MediaCodecId::H265:
+			inserted = H265SeiInserter::InsertRegisteredUserData(packet, payload);
+			break;
+		case cmn::MediaCodecId::Av1:
+			inserted = Av1MetadataInserter::InsertItuTT35(packet, payload);
+			break;
+		default:
+			break;
+	}
+
+	if (inserted == false)
+	{
+		logtw("Could not restore ATSC A/53 captions in %s. pts(%" PRId64 ")",
+			  cmn::GetCodecIdString(_codec_id), packet->GetPts());
+	}
+
+	_a53_captions_by_pts.erase(it);
+}

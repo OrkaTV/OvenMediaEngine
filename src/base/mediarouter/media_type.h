@@ -133,8 +133,10 @@ namespace cmn
 		NETINT,	   // HW
 		LIBVPX,	   // SW
 		LIBAOM,	   // SW
+		SVTAV1,	   // SW
 		FDKAAC,	   // SW
 		LIBOPUS,   // SW
+		X265,	   // SW
 		NB
 	};
 
@@ -151,8 +153,10 @@ namespace cmn
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, NETINT);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, LIBVPX);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, LIBAOM);
+			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, SVTAV1);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, FDKAAC);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, LIBOPUS);
+			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, X265);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, NB);
 		}
 
@@ -521,6 +525,11 @@ namespace cmn
 		{
 			return cmn::MediaCodecModuleId::LIBAOM;
 		}
+		else if (name.HasSuffix("_SVTAV1") || name.HasSuffix("SVTAV1") ||
+				 name.HasSuffix("_SVT_AV1") || name.HasSuffix("SVT_AV1"))
+		{
+			return cmn::MediaCodecModuleId::SVTAV1;
+		}
 		else if (name.HasSuffix("_FDKAAC") || name.HasSuffix("FDKAAC"))
 		{
 			return cmn::MediaCodecModuleId::FDKAAC;
@@ -528,6 +537,10 @@ namespace cmn
 		else if (name.HasSuffix("_X264") || name.HasSuffix("X264"))
 		{
 			return cmn::MediaCodecModuleId::X264;
+		}
+		else if (name.HasSuffix("_X265") || name.HasSuffix("X265"))
+		{
+			return cmn::MediaCodecModuleId::X265;
 		}
 		else if (name.HasSuffix("_DEFAULT") || name.HasSuffix("DEFAULT"))
 		{
@@ -548,9 +561,11 @@ namespace cmn
 			OV_CASE_RETURN(MediaCodecModuleId::XMA, "xma");
 			OV_CASE_RETURN(MediaCodecModuleId::LIBVPX, "libvpx");
 			OV_CASE_RETURN(MediaCodecModuleId::LIBAOM, "libaom");
+			OV_CASE_RETURN(MediaCodecModuleId::SVTAV1, "svtav1");
 			OV_CASE_RETURN(MediaCodecModuleId::FDKAAC, "fdkaac");
 			OV_CASE_RETURN(MediaCodecModuleId::LIBOPUS, "libopus");
 			OV_CASE_RETURN(MediaCodecModuleId::X264, "x264");
+			OV_CASE_RETURN(MediaCodecModuleId::X265, "x265");
 			OV_CASE_RETURN(MediaCodecModuleId::None, "none");
 			// Dimiden - Kept this value as it was returning `none`
 			// before refactoring due to not being handled in the case statement

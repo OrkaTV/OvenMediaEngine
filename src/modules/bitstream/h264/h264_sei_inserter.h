@@ -96,6 +96,11 @@ public:
 							   const std::shared_ptr<MediaPacket> &packet,
 							   const ov::String &data);
 
+	// user_data_registered_itu_t_t35 (payloadType 4), used for ATSC A/53 captions.
+	// `payload` is the complete ITU-T T.35 body beginning with the country code.
+	static bool InsertRegisteredUserData(const std::shared_ptr<MediaPacket> &packet,
+										 const std::shared_ptr<const ov::Data> &payload);
+
 private:
 	// Where a pic_timing SEI belongs in an access unit
 	struct SeiPlacement

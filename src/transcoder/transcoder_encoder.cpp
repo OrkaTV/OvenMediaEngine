@@ -173,6 +173,10 @@ std::shared_ptr<TranscodeEncoder> TranscodeEncoder::Instantiate(
 	{
 		switch (module_id)
 		{
+#ifdef THIRDP_LIBX265_ENABLED
+			case cmn::MediaCodecModuleId::DEFAULT:
+			case cmn::MediaCodecModuleId::X265: return std::make_shared<AVCodecVideoEncoder>(stream_info, codec_id, cmn::MediaCodecModuleId::X265);
+#endif
 			default: break;
 		}
 	}
@@ -182,6 +186,17 @@ std::shared_ptr<TranscodeEncoder> TranscodeEncoder::Instantiate(
 		switch (module_id)
 		{
 			case cmn::MediaCodecModuleId::DEFAULT:
+#ifdef THIRDP_LIBSVTAV1_ENABLED
+				return std::make_shared<AVCodecVideoEncoder>(stream_info, codec_id, cmn::MediaCodecModuleId::SVTAV1);
+#else
+				return std::make_shared<AVCodecVideoEncoder>(stream_info, codec_id, cmn::MediaCodecModuleId::LIBAOM);
+#endif
+			case cmn::MediaCodecModuleId::SVTAV1:
+#ifdef THIRDP_LIBSVTAV1_ENABLED
+				return std::make_shared<AVCodecVideoEncoder>(stream_info, codec_id, cmn::MediaCodecModuleId::SVTAV1);
+#else
+				break;
+#endif
 			case cmn::MediaCodecModuleId::LIBAOM:
 				return std::make_shared<AVCodecVideoEncoder>(stream_info, codec_id, cmn::MediaCodecModuleId::LIBAOM);
 			default: break;

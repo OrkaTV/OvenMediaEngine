@@ -172,6 +172,16 @@ macro(ome_find_pkg var pkg version_var)
         else()
             list(APPEND _FP_HWACCEL_ARGS -DOME_ENABLE_X264=OFF)
         endif()
+        if(OME_ENABLE_X265)
+            list(APPEND _FP_HWACCEL_ARGS -DOME_ENABLE_X265=ON)
+        else()
+            list(APPEND _FP_HWACCEL_ARGS -DOME_ENABLE_X265=OFF)
+        endif()
+        if(OME_ENABLE_SVT_AV1)
+            list(APPEND _FP_HWACCEL_ARGS -DOME_ENABLE_SVT_AV1=ON)
+        else()
+            list(APPEND _FP_HWACCEL_ARGS -DOME_ENABLE_SVT_AV1=OFF)
+        endif()
         if(OME_WHISPER_STATIC)
             list(APPEND _FP_HWACCEL_ARGS -DOME_WHISPER_STATIC=ON)
         endif()        
@@ -513,6 +523,42 @@ if(OME_ENABLE_X264)
     endif()
 else()
     message(STATUS "[OME] libx264: disabled by OME_ENABLE_X264=OFF")
+endif()
+
+# libx265 - FFmpeg uses this internally when built with --enable-libx265.
+if(OME_ENABLE_X265)
+    ome_find_pkg(PKG_X265 x265 OME_VER_X265
+        REINSTALL_TARGET libx265
+        PROBE_LIBRARY x265
+        ON_MISSING DISABLE
+        ON_MISMATCH FATAL
+    )
+    if(PKG_X265_FOUND)
+        message(STATUS "[OME] libx265: found (${PKG_X265_VERSION}) - enabling THIRDP_LIBX265_ENABLED")
+        add_compile_definitions(THIRDP_LIBX265_ENABLED)
+    else()
+        message(STATUS "[OME] libx265: not found - x265 encoder disabled")
+    endif()
+else()
+    message(STATUS "[OME] libx265: disabled by OME_ENABLE_X265=OFF")
+endif()
+
+# SVT-AV1 - FFmpeg uses this internally when built with --enable-libsvtav1.
+if(OME_ENABLE_SVT_AV1)
+    ome_find_pkg(PKG_SVT_AV1 SvtAv1Enc OME_VER_SVT_AV1
+        REINSTALL_TARGET libsvtav1
+        PROBE_LIBRARY SvtAv1Enc
+        ON_MISSING DISABLE
+        ON_MISMATCH FATAL
+    )
+    if(PKG_SVT_AV1_FOUND)
+        message(STATUS "[OME] SVT-AV1: found (${PKG_SVT_AV1_VERSION}) - enabling THIRDP_LIBSVTAV1_ENABLED")
+        add_compile_definitions(THIRDP_LIBSVTAV1_ENABLED)
+    else()
+        message(STATUS "[OME] SVT-AV1: not found - SVT-AV1 encoder disabled")
+    endif()
+else()
+    message(STATUS "[OME] SVT-AV1: disabled by OME_ENABLE_SVT_AV1=OFF")
 endif()
 
 

@@ -35,6 +35,12 @@ namespace tc
 						   false, false, true, false));
 #endif
 
+#ifdef THIRDP_LIBX265_ENABLED
+		Register(info::CodecModule("x265 HEVC Codec", cmn::MediaType::Video, cmn::MediaCodecModuleId::X265, 0, "-",
+						   {cmn::MediaCodecId::H265},
+						   false, false, true, false));
+#endif
+
 		Register(info::CodecModule("WebM VP8/VP9 Codec SDK", cmn::MediaType::Video, cmn::MediaCodecModuleId::LIBVPX, 0, "-",
 						   {cmn::MediaCodecId::Vp8},
 						   true, false, true, false));
@@ -42,6 +48,12 @@ namespace tc
 		Register(info::CodecModule("AOMedia AV1 Codec SDK", cmn::MediaType::Video, cmn::MediaCodecModuleId::LIBAOM, 0, "-",
 						   {cmn::MediaCodecId::Av1},
 						   true, true, true, false));
+
+#ifdef THIRDP_LIBSVTAV1_ENABLED
+		Register(info::CodecModule("SVT-AV1 Encoder", cmn::MediaType::Video, cmn::MediaCodecModuleId::SVTAV1, 0, "-",
+						   {cmn::MediaCodecId::Av1},
+						   false, false, true, false));
+#endif
 
 		// --------------------------------------------------------------------------
 		// Audio Codecs
