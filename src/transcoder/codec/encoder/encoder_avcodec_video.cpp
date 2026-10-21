@@ -13,7 +13,9 @@
 #include <algorithm>
 #include <thread>
 
+#include <modules/bitstream/av1/av1_metadata_inserter.h>
 #include <modules/bitstream/h264/h264_sei_inserter.h>
+#include <modules/bitstream/h265/h265_sei_inserter.h>
 
 #include "../../transcoder_private.h"
 
@@ -569,7 +571,10 @@ EncodeResult AVCodecVideoEncoder::ReceivePacket()
 
 void AVCodecVideoEncoder::CaptureA53Captions(const std::shared_ptr<const MediaFrame> &frame)
 {
-	if (_codec_id != cmn::MediaCodecId::H264 || frame == nullptr)
+	if ((_codec_id != cmn::MediaCodecId::H264 &&
+		 _codec_id != cmn::MediaCodecId::H265 &&
+		 _codec_id != cmn::MediaCodecId::Av1) ||
+		frame == nullptr)
 	{
 		return;
 	}
@@ -599,7 +604,7 @@ void AVCodecVideoEncoder::CaptureA53Captions(const std::shared_ptr<const MediaFr
 
 void AVCodecVideoEncoder::RestoreA53Captions(const std::shared_ptr<MediaPacket> &packet)
 {
-	if (_codec_id != cmn::MediaCodecId::H264 || packet == nullptr)
+	if (packet == nullptr)
 	{
 		return;
 	}
@@ -621,9 +626,26 @@ void AVCodecVideoEncoder::RestoreA53Captions(const std::shared_ptr<MediaPacket> 
 	const uint8_t marker_bits = 0xFF;
 	payload->Append(&marker_bits, sizeof(marker_bits));
 
-	if (H264SeiInserter::InsertRegisteredUserData(packet, payload) == false)
+	bool inserted = false;
+	switch (_codec_id)
 	{
-		logtw("Could not restore ATSC A/53 captions. pts(%" PRId64 ")", packet->GetPts());
+		case cmn::MediaCodecId::H264:
+			inserted = H264SeiInserter::InsertRegisteredUserData(packet, payload);
+			break;
+		case cmn::MediaCodecId::H265:
+			inserted = H265SeiInserter::InsertRegisteredUserData(packet, payload);
+			break;
+		case cmn::MediaCodecId::Av1:
+			inserted = Av1MetadataInserter::InsertItuTT35(packet, payload);
+			break;
+		default:
+			break;
+	}
+
+	if (inserted == false)
+	{
+		logtw("Could not restore ATSC A/53 captions in %s. pts(%" PRId64 ")",
+			  cmn::GetCodecIdString(_codec_id), packet->GetPts());
 	}
 
 	_a53_captions_by_pts.erase(it);

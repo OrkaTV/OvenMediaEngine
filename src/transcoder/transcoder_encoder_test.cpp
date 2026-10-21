@@ -96,9 +96,9 @@ namespace
 	class A53CaptionTestEncoder : public AVCodecVideoEncoder
 	{
 	public:
-		A53CaptionTestEncoder()
+		explicit A53CaptionTestEncoder(cmn::MediaCodecId codec_id = cmn::MediaCodecId::H264)
 			: AVCodecVideoEncoder(info::Stream(StreamSourceType::Transcoder),
-								  cmn::MediaCodecId::H264,
+								  codec_id,
 								  cmn::MediaCodecModuleId::X264)
 		{
 		}
@@ -153,6 +153,64 @@ TEST(A53CaptionTest, RestoresGa94SeiByFramePts)
 		MediaPacketFlag::Key, cmn::BitstreamFormat::H264_ANNEXB, cmn::PacketType::NALU);
 
 	A53CaptionTestEncoder encoder;
+	encoder.Preserve(frame, packet);
+
+	const uint8_t signature[] = {0xB5, 0x00, 0x31, 'G', 'A', '9', '4', 0x03};
+	const auto *begin = packet->GetData()->GetDataAs<uint8_t>();
+	const auto *end = begin + packet->GetData()->GetLength();
+	EXPECT_NE(std::search(begin, end, std::begin(signature), std::end(signature)), end);
+}
+
+TEST(A53CaptionTest, RestoresGa94IntoHevcWhenChangingCodec)
+{
+	AVFrame *av_frame = ::av_frame_alloc();
+	ASSERT_NE(av_frame, nullptr);
+	av_frame->pts = 9000;
+	auto *side_data = ::av_frame_new_side_data(av_frame, AV_FRAME_DATA_A53_CC, 3);
+	ASSERT_NE(side_data, nullptr);
+	const uint8_t cc_data[] = {0xFC, 0x80, 0x80};
+	::memcpy(side_data->data, cc_data, sizeof(cc_data));
+	auto frame = ffmpeg::compat::ToMediaFrame(cmn::MediaType::Video, av_frame);
+	::av_frame_free(&av_frame);
+
+	const uint8_t access_unit[] = {
+		0x00, 0x00, 0x00, 0x01, 0x26, 0x01, 0xBB
+	};
+	auto packet = std::make_shared<MediaPacket>(
+		cmn::MediaType::Video, 1,
+		std::make_shared<ov::Data>(access_unit, sizeof(access_unit)),
+		9000, 9000, 3000, MediaPacketFlag::Key,
+		cmn::BitstreamFormat::H265_ANNEXB, cmn::PacketType::NALU);
+
+	A53CaptionTestEncoder encoder(cmn::MediaCodecId::H265);
+	encoder.Preserve(frame, packet);
+
+	const uint8_t signature[] = {0xB5, 0x00, 0x31, 'G', 'A', '9', '4', 0x03};
+	const auto *begin = packet->GetData()->GetDataAs<uint8_t>();
+	const auto *end = begin + packet->GetData()->GetLength();
+	EXPECT_NE(std::search(begin, end, std::begin(signature), std::end(signature)), end);
+}
+
+TEST(A53CaptionTest, RestoresGa94IntoAv1WhenChangingCodec)
+{
+	AVFrame *av_frame = ::av_frame_alloc();
+	ASSERT_NE(av_frame, nullptr);
+	av_frame->pts = 9000;
+	auto *side_data = ::av_frame_new_side_data(av_frame, AV_FRAME_DATA_A53_CC, 3);
+	ASSERT_NE(side_data, nullptr);
+	const uint8_t cc_data[] = {0xFC, 0x80, 0x80};
+	::memcpy(side_data->data, cc_data, sizeof(cc_data));
+	auto frame = ffmpeg::compat::ToMediaFrame(cmn::MediaType::Video, av_frame);
+	::av_frame_free(&av_frame);
+
+	const uint8_t frame_obu[] = {0x32, 0x01, 0x00};
+	auto packet = std::make_shared<MediaPacket>(
+		cmn::MediaType::Video, 1,
+		std::make_shared<ov::Data>(frame_obu, sizeof(frame_obu)),
+		9000, 9000, 3000, MediaPacketFlag::Key,
+		cmn::BitstreamFormat::AV1_OBU, cmn::PacketType::RAW);
+
+	A53CaptionTestEncoder encoder(cmn::MediaCodecId::Av1);
 	encoder.Preserve(frame, packet);
 
 	const uint8_t signature[] = {0xB5, 0x00, 0x31, 'G', 'A', '9', '4', 0x03};
