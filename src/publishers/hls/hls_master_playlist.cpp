@@ -52,6 +52,12 @@ ov::String HlsMasterPlaylist::ToString(bool rewind) const
 	ov::String result = "#EXTM3U\n";
 	result += ov::String::FormatString("#EXT-X-VERSION:%d\n\n", _config.version);
 
+	if (_config.enable_closed_captions)
+	{
+		result += "#EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS,GROUP-ID=\"cc\",NAME=\"English\","
+				  "LANGUAGE=\"en\",DEFAULT=YES,AUTOSELECT=YES,INSTREAM-ID=\"CC1\"\n";
+	}
+
 	if (has_vtt)
 	{
 		for (const auto &vtt_playlist : vtt_playlists)
@@ -97,6 +103,10 @@ ov::String HlsMasterPlaylist::ToString(bool rewind) const
 			{
 				result += ov::String::FormatString(",SUBTITLES=\"%s\"", kSubtitleTrackVariantName);
 			}
+			if (_config.enable_closed_captions)
+			{
+				result += ",CLOSED-CAPTIONS=\"cc\"";
+			}
 			result += "\n";
 											
 		}
@@ -109,6 +119,10 @@ ov::String HlsMasterPlaylist::ToString(bool rewind) const
 			if (has_vtt)
 			{
 				result += ov::String::FormatString(",SUBTITLES=\"%s\"", kSubtitleTrackVariantName);
+			}
+			if (_config.enable_closed_captions)
+			{
+				result += ",CLOSED-CAPTIONS=\"cc\"";
 			}
 			result += "\n";
 		}

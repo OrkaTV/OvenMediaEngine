@@ -18,6 +18,7 @@ public:
 	struct Config
 	{
 		uint8_t version = 3;
+		bool enable_closed_captions = false;
 	};
 
 	HlsMasterPlaylist(const ov::String &playlist_file_name, const Config &config);

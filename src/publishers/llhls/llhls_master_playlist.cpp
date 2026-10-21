@@ -19,6 +19,11 @@ void LLHlsMasterPlaylist::SetDefaultOptions(bool legacy, bool rewind)
 	_default_rewind = rewind;
 }
 
+void LLHlsMasterPlaylist::SetClosedCaptionsEnabled(bool enabled)
+{
+	_closed_captions_enabled = enabled;
+}
+
 void LLHlsMasterPlaylist::SetChunkPath(const ov::String &chunk_path)
 {
 	_chunk_path = chunk_path;
@@ -325,6 +330,12 @@ ov::String LLHlsMasterPlaylist::MakePlaylist(const ov::String &chunk_query_strin
 	playlist.AppendFormat("#EXT-X-VERSION:%d\n", version);
 	playlist.AppendFormat("#EXT-X-INDEPENDENT-SEGMENTS\n");
 
+	if (_closed_captions_enabled)
+	{
+		playlist.AppendFormat("#EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS,GROUP-ID=\"cc\",NAME=\"English\","
+							  "LANGUAGE=\"en\",DEFAULT=YES,AUTOSELECT=YES,INSTREAM-ID=\"CC1\"\n");
+	}
+
 	// Write EXT-X-MEDIA from _media_infos
 	// shared lock
 	std::shared_lock<std::shared_mutex> media_infos_lock(_media_groups_guard);
@@ -467,6 +478,11 @@ ov::String LLHlsMasterPlaylist::MakePlaylist(const ov::String &chunk_query_strin
 		if (stream_info->_subtitle_group_id.IsEmpty() == false)
 		{
 			playlist.AppendFormat(",SUBTITLES=\"%s\"", stream_info->_subtitle_group_id.CStr());
+		}
+
+		if (_closed_captions_enabled)
+		{
+			playlist.AppendFormat(",CLOSED-CAPTIONS=\"cc\"");
 		}
 
 		// URI

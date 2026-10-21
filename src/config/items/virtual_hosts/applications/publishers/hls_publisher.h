@@ -31,6 +31,7 @@ namespace cfg
 					int _segment_count		 = 5;
 					double _segment_duration = 10;
 					bool _enable_max_duration = false;
+					bool _enable_closed_captions = false;
 
 					Dvr _dvr;
 					DefaultQueryString _default_query_string;
@@ -51,6 +52,7 @@ namespace cfg
 					CFG_DECLARE_CONST_REF_GETTER_OF(GetSegmentCount, _segment_count)
 					CFG_DECLARE_CONST_REF_GETTER_OF(GetSegmentDuration, _segment_duration)
 					CFG_DECLARE_CONST_REF_GETTER_OF(IsMaxDurationEnabled, _enable_max_duration)
+					CFG_DECLARE_CONST_REF_GETTER_OF(IsClosedCaptionsEnabled, _enable_closed_captions)
 					CFG_DECLARE_CONST_REF_GETTER_OF(GetDumps, _dumps)
 					CFG_DECLARE_CONST_REF_GETTER_OF(GetCacheControl, _cache_control)
 					CFG_DECLARE_CONST_REF_GETTER_OF(GetDvr, _dvr)
@@ -66,6 +68,7 @@ namespace cfg
 						Register<Optional>("ServerTimeBasedSegmentNumbering", &_server_time_based_segment_numbering);
 						Register<Optional>("SegmentCount", &_segment_count);
 						Register<Optional>("EnableMaxDuration", &_enable_max_duration);
+						Register<Optional>("EnableClosedCaptions", &_enable_closed_captions);
 						// The segmentation cadence divides by this everywhere
 						Register<Optional>("SegmentDuration", &_segment_duration, nullptr, [=]() -> std::shared_ptr<ConfigError> {
 								if (_segment_duration <= 0)

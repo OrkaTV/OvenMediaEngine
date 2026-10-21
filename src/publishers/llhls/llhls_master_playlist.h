@@ -50,6 +50,7 @@ public:
 
 
 	void SetDefaultOptions(bool legacy, bool rewind);
+	void SetClosedCaptionsEnabled(bool enabled);
 
 	void SetChunkPath(const ov::String &chunk_path);
 	void SetCencProperty(const bmff::CencProperty &cenc_property);
@@ -132,6 +133,7 @@ private:
 
 	bool _default_legacy = false;
 	bool _default_rewind = true;
+	bool _closed_captions_enabled = false;
 
 	ov::String MakePlaylist(const ov::String &chunk_query_string, bool legacy, bool rewind, bool include_path=true) const;
 	ov::String MakeSessionKey() const;

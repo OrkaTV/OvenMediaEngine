@@ -864,6 +864,7 @@ bool HlsStream::CreatePackagers()
 		}
 
 		HlsMasterPlaylist::Config master_playlist_config;
+		master_playlist_config.enable_closed_captions = _ts_config.IsClosedCaptionsEnabled();
 
 		auto master_playlist = std::make_shared<HlsMasterPlaylist>(playlist->GetFileName(), master_playlist_config);
 		master_playlist->SetDefaultOption(_default_option_rewind);
@@ -1000,7 +1001,9 @@ bool HlsStream::CreatePackagers()
 			//////////////////////////////////
 			// Create Packetizer
 			//////////////////////////////////
-			auto packetizer = std::make_shared<mpegts::Packetizer>();
+			mpegts::Packetizer::Config packetizer_config;
+			packetizer_config.enable_closed_captions = _ts_config.IsClosedCaptionsEnabled();
+			auto packetizer = std::make_shared<mpegts::Packetizer>(packetizer_config);
 			if (packetizer == nullptr)
 			{
 				logte("Failed to create packager");

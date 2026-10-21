@@ -12,7 +12,10 @@
 #include <modules/containers/mpegts/mpegts_packager.h>
 #include <modules/containers/mpegts/mpegts_packetizer.h>
 
+#include "hls_master_playlist.h"
 #include "hls_media_playlist.h"
+
+#include <algorithm>
 
 namespace
 {
@@ -95,12 +98,75 @@ namespace
 		std::vector<std::shared_ptr<base::modules::Segment>> _created;
 		std::vector<std::shared_ptr<base::modules::Segment>> _deleted;
 	};
+
+	bool ContainsBytes(const std::shared_ptr<const ov::Data> &data, std::initializer_list<uint8_t> expected)
+	{
+		const auto *begin = data->GetDataAs<uint8_t>();
+		const auto *end = begin + data->GetLength();
+		return std::search(begin, end, expected.begin(), expected.end()) != end;
+	}
 }  // namespace
+
+TEST(HlsMasterPlaylist, AdvertisesClosedCaptionsWhenEnabled)
+{
+	HlsMasterPlaylist::Config config;
+	config.enable_closed_captions = true;
+	HlsMasterPlaylist master("master.m3u8", config);
+
+	HlsMediaPlaylist::HlsMediaPlaylistConfig media_config;
+	auto media = std::make_shared<HlsMediaPlaylist>("video", "video.m3u8", media_config);
+	auto track = MakeTrack(1, cmn::MediaType::Video, cmn::MediaCodecId::H264, 1);
+	track->SetResolution(1920, 1080);
+	track->SetFrameRateByConfig(30.0);
+	track->SetBitrateByConfig(5000000);
+	media->AddMediaTrackInfo(track);
+	media->OnSegmentCreated(MakeSegment(1, 0, 2000.0, 1, false, "avc1.640028"));
+	master.AddMediaPlaylist(media);
+
+	auto playlist = master.ToString(false);
+	EXPECT_NE(playlist.IndexOf("#EXT-X-MEDIA:TYPE=CLOSED-CAPTIONS,GROUP-ID=\"cc\",NAME=\"English\","
+							   "LANGUAGE=\"en\",DEFAULT=YES,AUTOSELECT=YES,INSTREAM-ID=\"CC1\""), -1);
+	EXPECT_NE(playlist.IndexOf("CLOSED-CAPTIONS=\"cc\""), -1);
+}
+
+TEST(HlsMasterPlaylist, OmitsClosedCaptionsByDefault)
+{
+	HlsMasterPlaylist master("master.m3u8", {});
+	auto playlist = master.ToString(false);
+	EXPECT_EQ(playlist.IndexOf("CLOSED-CAPTIONS"), -1);
+	EXPECT_EQ(playlist.IndexOf("TYPE=CLOSED-CAPTIONS"), -1);
+}
 
 // ---------------------------------------------------------------------------
 // mpegts::Packetizer - the PMT version bumps and the PSI is re-broadcast only
 // when the elementary stream type (codec) changes.
 // ---------------------------------------------------------------------------
+
+TEST(HlsPacketizer, IncludesCaptionServiceDescriptorWhenEnabled)
+{
+	auto sink = std::make_shared<CountingPacketizerSink>();
+	mpegts::Packetizer::Config config;
+	config.enable_closed_captions = true;
+	mpegts::Packetizer packetizer(config);
+	packetizer.AddSink(sink);
+	ASSERT_TRUE(packetizer.AddTrack(MakeTrack(1, cmn::MediaType::Video, cmn::MediaCodecId::H264, 1)));
+	ASSERT_TRUE(packetizer.Start());
+	ASSERT_NE(sink->_last_pmt, nullptr);
+
+	EXPECT_TRUE(ContainsBytes(sink->_last_pmt->GetData(), {0x86, 0x07, 0xE1, 'e', 'n', 'g', 0x7E, 0x3F, 0xFF}));
+}
+
+TEST(HlsPacketizer, OmitsCaptionServiceDescriptorByDefault)
+{
+	auto sink = std::make_shared<CountingPacketizerSink>();
+	mpegts::Packetizer packetizer;
+	packetizer.AddSink(sink);
+	ASSERT_TRUE(packetizer.AddTrack(MakeTrack(1, cmn::MediaType::Video, cmn::MediaCodecId::H264, 1)));
+	ASSERT_TRUE(packetizer.Start());
+	ASSERT_NE(sink->_last_pmt, nullptr);
+
+	EXPECT_FALSE(ContainsBytes(sink->_last_pmt->GetData(), {0x86, 0x07, 0xE1, 'e', 'n', 'g', 0x7E, 0x3F, 0xFF}));
+}
 
 TEST(HlsPacketizer, RebroadcastsPsiOnCodecChange)
 {

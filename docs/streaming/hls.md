@@ -55,6 +55,7 @@ To use HLS, you need to add the `<HLS>` elements to the `<Publishers>` in the co
                         <HLS>
                             <SegmentCount>5</SegmentCount>
                             <SegmentDuration>4</SegmentDuration>
+                            <EnableClosedCaptions>false</EnableClosedCaptions>
                             <DVR>
                                 <Enable>true</Enable>
                                 <EventPlaylistType>false</EventPlaylistType>
@@ -73,7 +74,7 @@ To use HLS, you need to add the `<HLS>` elements to the `<Publishers>` in the co
 </Server>
 ```
 
-<table><thead><tr><th width="241">Element</th><th>Decscription</th></tr></thead><tbody><tr><td>`Bind`</td><td>Set the HTTP ports to provide HLS.</td></tr><tr><td>`SegmentDuration`</td><td>Set the length of the segment in seconds. Therefore, a shorter value allows the stream to start faster. However, a value that is too short will make legacy HLS players unstable. Apple recommends <strong>`6`</strong> seconds for this value.</td></tr><tr><td>`SegmentCount`</td><td>The number of segments listed in the playlist. <strong>`5`</strong> is recommended for HLS players. Do not set below `3`. It can only be used for experimentation.</td></tr><tr><td>`CrossDomains`</td><td>Control the domain in which the player works through <code>&#x3C;CrossDomain></code>. For more information, please refer to the <a href="../crossdomains.md">CrossDomains</a> section.</td></tr><tr><td>`DVR`</td><td><p><strong>Enable</strong> <br />You can turn DVR on or off.</p><p><strong>EventPlaylistType</strong> <br />Inserts `#EXT-X-PLAYLIST-TYPE: EVENT` into the m3u8 file.</p><p><strong>TempStoragePath</strong> <br />Specifies a temporary folder to store old segments.</p><p><strong>MaxDuration</strong> <br />Sets the maximum duration of recorded files in milliseconds.</p></td></tr></tbody></table>
+<table><thead><tr><th width="241">Element</th><th>Decscription</th></tr></thead><tbody><tr><td>`Bind`</td><td>Set the HTTP ports to provide HLS.</td></tr><tr><td>`SegmentDuration`</td><td>Set the length of the segment in seconds. Therefore, a shorter value allows the stream to start faster. However, a value that is too short will make legacy HLS players unstable. Apple recommends <strong>`6`</strong> seconds for this value.</td></tr><tr><td>`SegmentCount`</td><td>The number of segments listed in the playlist. <strong>`5`</strong> is recommended for HLS players. Do not set below `3`. It can only be used for experimentation.</td></tr><tr><td>`EnableClosedCaptions`</td><td>Advertise an English CEA-608 `CC1` service in MPEG-TS PMTs and HLS master playlists. Streams without embedded caption data still expose the caption option but display no text.</td></tr><tr><td>`CrossDomains`</td><td>Control the domain in which the player works through <code>&#x3C;CrossDomain></code>. For more information, please refer to the <a href="../crossdomains.md">CrossDomains</a> section.</td></tr><tr><td>`DVR`</td><td><p><strong>Enable</strong> <br />You can turn DVR on or off.</p><p><strong>EventPlaylistType</strong> <br />Inserts `#EXT-X-PLAYLIST-TYPE: EVENT` into the m3u8 file.</p><p><strong>TempStoragePath</strong> <br />Specifies a temporary folder to store old segments.</p><p><strong>MaxDuration</strong> <br />Sets the maximum duration of recorded files in milliseconds.</p></td></tr></tbody></table>
 
 
 
@@ -120,11 +121,12 @@ If you use the default configuration, you can start streaming with the following
 
 `http://{OvenMediaEngine Host}:3333/{App Name}/{Stream Name}/master.m3u8?format=ts`
 
-H.264 elementary streams in MPEG-TS advertise an English CEA-608 Line 21 field-1
-caption service (`CC1`) in the Program Map Table. When the input H.264 carries
-ATSC A/53 caption data in SEI messages, native players such as Safari can
-discover and decode it. Streams without embedded caption data still advertise
-the service but display no caption text.
+When `<EnableClosedCaptions>true</EnableClosedCaptions>` is set under the HLS
+publisher, H.264 elementary streams advertise an English CEA-608 Line 21 field-1
+caption service (`CC1`) in both the MPEG-TS Program Map Table and HLS master
+playlist. When the input H.264 carries ATSC A/53 caption data in SEI messages,
+native players such as Safari can discover and decode it. Streams without
+embedded caption data still advertise the service but display no caption text.
 
 We have prepared a test player that you can quickly see if OvenMediaEngine is working. Please refer to the [Test Player](../quick-start/test-player.md) for more information.
 

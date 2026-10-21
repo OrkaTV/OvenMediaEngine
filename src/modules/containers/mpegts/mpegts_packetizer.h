@@ -35,6 +35,7 @@ namespace mpegts
         struct Config
         {
             uint32_t mpegts_packet_size = 188;
+            bool enable_closed_captions = false;
         };
 
         Packetizer();
