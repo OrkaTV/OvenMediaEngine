@@ -132,6 +132,85 @@ bool AVCodecVideoEncoder::SetParamsX264()
 }
 
 // ---------------------------------------------------------------------------
+// libx265
+// ---------------------------------------------------------------------------
+bool AVCodecVideoEncoder::SetParamsX265()
+{
+	_codec.SetBitrate(GetRefTrack()->GetBitrate());
+	_codec.SetRcMinRate(_codec.GetBitrate());
+	_codec.SetRcMaxRate(_codec.GetBitrate());
+	_codec.SetRcBufferSize(static_cast<int>(_codec.GetBitrate() / 2));
+	_codec.SetFrameRate(cmn::Rational::FromDouble(GetRefTrack()->GetFrameRate()));
+	_codec.SetSampleAspectRatio(cmn::Rational(1, 1));
+	_codec.SetTicksPerFrame(1);
+	_codec.SetTimeBase(GetRefTrack()->GetTimeBase());
+	_codec.SetMaxBFrames(GetRefTrack()->GetBFrames());
+	_codec.SetPixelFormat(GetSupportVideoFormat());
+	auto resolution = GetRefTrack()->GetResolution();
+	_codec.SetWidth(resolution.width);
+	_codec.SetHeight(resolution.height);
+
+	auto key_frame_interval_type = GetRefTrack()->GetKeyFrameIntervalTypeByConfig();
+	if (key_frame_interval_type == cmn::KeyFrameIntervalType::TIME)
+	{
+		_codec.SetGopSize((int32_t)(GetRefTrack()->GetFrameRate() * (double)GetRefTrack()->GetKeyFrameInterval() / 1000));
+	}
+	else if (key_frame_interval_type == cmn::KeyFrameIntervalType::FRAME)
+	{
+		_codec.SetGopSize((GetRefTrack()->GetKeyFrameInterval() == 0) ?
+						  (int32_t)_codec.GetFrameRate().GetExpr() :
+						  GetRefTrack()->GetKeyFrameInterval());
+	}
+
+	const int thread_count = GetRefTrack()->GetThreadCount() < 0 ?
+							 std::min(std::max(4, static_cast<int>(std::max(1u, std::thread::hardware_concurrency())) / 3), 8) :
+							 GetRefTrack()->GetThreadCount();
+	_codec.SetThreadCount(thread_count);
+
+	auto profile = GetRefTrack()->GetProfile().LowerCaseString();
+	if (profile.IsEmpty() || profile == "main")
+	{
+		_codec.SetOption("profile", "main");
+	}
+	else
+	{
+		logtw("Unsupported libx265 profile(%s) for 8-bit YUV420 input. Use main.", profile.CStr());
+		_codec.SetOption("profile", "main");
+	}
+
+	auto preset = GetRefTrack()->GetPreset().LowerCaseString();
+	if (preset == "slower" || preset == "slow" || preset == "medium" ||
+		preset == "fast" || preset == "faster")
+	{
+		_codec.SetOption("preset", preset.CStr());
+	}
+	else
+	{
+		_codec.SetOption("preset", "faster");
+	}
+	_codec.SetOption("tune", "zerolatency");
+
+	ov::String extra_options = ov::String::FormatString(
+		"bframes=%d:scenecut=0:keyint=%d:min-keyint=%d:open-gop=0:repeat-headers=1:pools=%d",
+		GetRefTrack()->GetBFrames(), _codec.GetGopSize(), _codec.GetGopSize(), thread_count);
+	if (!GetRefTrack()->GetExtraEncoderOptionsByConfig().IsEmpty())
+	{
+		if (!GetRefTrack()->GetExtraEncoderOptionsByConfig().HasPrefix(":"))
+		{
+			extra_options += ":";
+		}
+		extra_options += GetRefTrack()->GetExtraEncoderOptionsByConfig();
+	}
+	_codec.SetOption("x265-params", extra_options.CStr());
+
+	logtd("opts: %s", ffmpeg::compat::GetAVOptionsString(_codec.GetPrivData()).CStr());
+
+	_bitstream_format = cmn::BitstreamFormat::H265_ANNEXB;
+	_packet_type = cmn::PacketType::NALU;
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // libopenh264
 // ---------------------------------------------------------------------------
 bool AVCodecVideoEncoder::SetParamsOpenH264()
@@ -405,6 +484,10 @@ bool AVCodecVideoEncoder::OpenCodec()
 	{
 		allocated = _codec.AllocEncoderByName("libaom-av1");
 	}
+	else if (_codec_id == cmn::MediaCodecId::H265)
+	{
+		allocated = _codec.AllocEncoderByName("libx265");
+	}
 	else if (_module_id == cmn::MediaCodecModuleId::X264)
 	{
 		allocated = _codec.AllocEncoderByName("libx264");
@@ -429,6 +512,9 @@ bool AVCodecVideoEncoder::OpenCodec()
 			break;
 		case cmn::MediaCodecId::Av1:
 			result = SetParamsLibAOM();
+			break;
+		case cmn::MediaCodecId::H265:
+			result = SetParamsX265();
 			break;
 		default:
 			if (_module_id == cmn::MediaCodecModuleId::X264)
@@ -559,4 +645,3 @@ EncodeResult AVCodecVideoEncoder::ReceivePacket()
 
 	return EncodeResult::Encoded(std::move(media_packet));
 }
-

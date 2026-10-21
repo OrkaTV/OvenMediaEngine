@@ -135,6 +135,7 @@ namespace cmn
 		LIBAOM,	   // SW
 		FDKAAC,	   // SW
 		LIBOPUS,   // SW
+		X265,	   // SW
 		NB
 	};
 
@@ -153,6 +154,7 @@ namespace cmn
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, LIBAOM);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, FDKAAC);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, LIBOPUS);
+			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, X265);
 			OV_CASE_RETURN_ENUM_STRING(MediaCodecModuleId, NB);
 		}
 
@@ -529,6 +531,10 @@ namespace cmn
 		{
 			return cmn::MediaCodecModuleId::X264;
 		}
+		else if (name.HasSuffix("_X265") || name.HasSuffix("X265"))
+		{
+			return cmn::MediaCodecModuleId::X265;
+		}
 		else if (name.HasSuffix("_DEFAULT") || name.HasSuffix("DEFAULT"))
 		{
 			return cmn::MediaCodecModuleId::DEFAULT;
@@ -551,6 +557,7 @@ namespace cmn
 			OV_CASE_RETURN(MediaCodecModuleId::FDKAAC, "fdkaac");
 			OV_CASE_RETURN(MediaCodecModuleId::LIBOPUS, "libopus");
 			OV_CASE_RETURN(MediaCodecModuleId::X264, "x264");
+			OV_CASE_RETURN(MediaCodecModuleId::X265, "x265");
 			OV_CASE_RETURN(MediaCodecModuleId::None, "none");
 			// Dimiden - Kept this value as it was returning `none`
 			// before refactoring due to not being handled in the case statement
