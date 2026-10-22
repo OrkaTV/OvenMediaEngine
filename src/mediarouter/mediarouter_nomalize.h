@@ -48,10 +48,9 @@ public:
 		const std::shared_ptr<AV1DecoderConfigurationRecord> &av1_config,
 		const Av1SequenceHeaderSummary &summary);
 
-	// Some RTMP encoders emit prefix SEI before the next access unit's AUD. H.264 requires
-	// the AUD to lead the access unit; strict decoders otherwise discover CC1 but ignore the
-	// registered-user-data captions. Move only the leading SEI run behind that AUD.
-	static bool MoveLeadingH264SeiAfterAud(std::shared_ptr<MediaPacket> &media_packet);
+	// Keep CEA registered-user-data SEI after AUD and before the first VCL NAL. Some RTMP
+	// encoders append it after VCL, where strict decoders discover CC1 but ignore its cues.
+	static bool MoveH264CaptionSeiAfterAud(std::shared_ptr<MediaPacket> &media_packet);
 
 	bool ProcessH264AVCCStream(const std::shared_ptr<info::Stream> &stream_info, const std::shared_ptr<MediaTrack> &media_track, std::shared_ptr<MediaPacket> &media_packet);
 	bool ProcessH264AnnexBStream(const std::shared_ptr<info::Stream> &stream_info, const std::shared_ptr<MediaTrack> &media_track, std::shared_ptr<MediaPacket> &media_packet);
