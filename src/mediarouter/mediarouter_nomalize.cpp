@@ -302,6 +302,79 @@ bool MediaRouterNormalize::ProcessH264AVCCStream(const std::shared_ptr<info::Str
 	return false;
 }
 
+bool MediaRouterNormalize::MoveLeadingH264SeiAfterAud(std::shared_ptr<MediaPacket> &media_packet)
+{
+	if (media_packet == nullptr || media_packet->GetData() == nullptr ||
+		media_packet->GetBitstreamFormat() != cmn::BitstreamFormat::H264_ANNEXB)
+	{
+		return false;
+	}
+
+	const auto *fragment_header = media_packet->GetFragHeader();
+	if (fragment_header == nullptr || fragment_header->GetCount() < 2)
+	{
+		return false;
+	}
+
+	const auto *buffer = media_packet->GetData()->GetDataAs<uint8_t>();
+	size_t aud_index   = 0;
+	for (; aud_index < fragment_header->GetCount(); ++aud_index)
+	{
+		auto fragment = fragment_header->GetFragment(aud_index);
+		if (fragment.has_value() == false || std::get<1>(fragment.value()) == 0)
+		{
+			return false;
+		}
+
+		const auto nal_type = static_cast<H264NalUnitType>(
+			buffer[std::get<0>(fragment.value())] & kH264NalUnitTypeMask);
+		if (nal_type != H264NalUnitType::Sei)
+		{
+			break;
+		}
+	}
+
+	if (aud_index == 0 || aud_index >= fragment_header->GetCount())
+	{
+		return false;
+	}
+
+	auto aud_fragment	= fragment_header->GetFragment(aud_index);
+	const auto aud_type = static_cast<H264NalUnitType>(
+		buffer[std::get<0>(aud_fragment.value())] & kH264NalUnitTypeMask);
+	if (aud_type != H264NalUnitType::Aud)
+	{
+		return false;
+	}
+
+	static constexpr uint8_t kStartCode[] = {0x00, 0x00, 0x00, 0x01};
+	auto reordered_data					  = std::make_shared<ov::Data>(media_packet->GetDataLength());
+	FragmentationHeader reordered_fragments;
+
+	auto append_fragment = [&](size_t index) {
+		auto fragment		= fragment_header->GetFragment(index);
+		const size_t offset = std::get<0>(fragment.value());
+		const size_t length = std::get<1>(fragment.value());
+		reordered_data->Append(kStartCode, sizeof(kStartCode));
+		reordered_fragments.AddFragment(reordered_data->GetLength(), length);
+		reordered_data->Append(buffer + offset, length);
+	};
+
+	append_fragment(aud_index);
+	for (size_t index = 0; index < aud_index; ++index)
+	{
+		append_fragment(index);
+	}
+	for (size_t index = aud_index + 1; index < fragment_header->GetCount(); ++index)
+	{
+		append_fragment(index);
+	}
+
+	media_packet->SetData(reordered_data);
+	media_packet->SetFragHeader(&reordered_fragments);
+	return true;
+}
+
 bool MediaRouterNormalize::ProcessH264AnnexBStream(const std::shared_ptr<info::Stream> &stream_info, const std::shared_ptr<MediaTrack> &media_track, std::shared_ptr<MediaPacket> &media_packet)
 {
 	// Everytime : Make fragment header, Set keyframe flag, Append SPS/PPS nal units in front of IDR frame
@@ -395,6 +468,7 @@ bool MediaRouterNormalize::ProcessH264AnnexBStream(const std::shared_ptr<info::S
 		offset += pos;
 	}
 	media_packet->SetFragHeader(&fragment_header);
+	MoveLeadingH264SeiAfterAud(media_packet);
 
 	// Update DecoderConfigurationRecord
 	if (sps_nalu != nullptr && pps_nalu != nullptr)
