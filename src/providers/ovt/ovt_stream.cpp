@@ -794,7 +794,9 @@ namespace pvd
 			}
 
 			auto media_packet = _depacketizer.PopMediaPacket();
-			media_packet->SetPacketType(cmn::PacketType::OVT);
+			// Keep the serialized packet type so MediaRouter rebuilds codec metadata such as
+			// H.264 fragmentation headers. Treating it as opaque OVT data drops non-VCL NAL
+			// units, including CEA-608/708 registered-user-data SEI, at the edge publisher.
 
 			int64_t pts = media_packet->GetPts();
 			int64_t dts = media_packet->GetDts();
