@@ -140,11 +140,34 @@ namespace mdl
 		return true;
 	}
 
-	bool Dump::DumpToFile(const ov::String &path, const ov::String &file_name, const std::shared_ptr<const ov::Data> &data, bool add_history, bool append)
+	bool Dump::PrepareDirectory(const ov::String &path)
 	{
+		std::lock_guard<std::mutex> lock(_prepared_directories_mutex);
+		if (_prepared_directories.find(path) != _prepared_directories.end())
+		{
+			return true;
+		}
+
 		if (ov::CreateDirectories(path) == false)
 		{
 			logw("DEBUG", "Could not create directories: %s", path.CStr());
+			return false;
+		}
+
+		_prepared_directories.emplace(path);
+		return true;
+	}
+
+	void Dump::ForgetPreparedDirectory(const ov::String &path)
+	{
+		std::lock_guard<std::mutex> lock(_prepared_directories_mutex);
+		_prepared_directories.erase(path);
+	}
+
+	bool Dump::DumpToFile(const ov::String &path, const ov::String &file_name, const std::shared_ptr<const ov::Data> &data, bool add_history, bool append)
+	{
+		if (PrepareDirectory(path) == false)
+		{
 			return false;
 		}
 
@@ -152,8 +175,15 @@ namespace mdl
 
 		if (ov::DumpToFile(file_path_name, data, 0, append) == nullptr)
 		{
-			logw("DEBUG", "Could not dump data to file: %s", file_path_name.CStr());
-			return false;
+			// The directory may have been removed after it was prepared. Recheck it
+			// only after a failed write to keep the normal path free of metadata calls.
+			ForgetPreparedDirectory(path);
+			if (PrepareDirectory(path) == false ||
+				ov::DumpToFile(file_path_name, data, 0, append) == nullptr)
+			{
+				logw("DEBUG", "Could not dump data to file: %s", file_path_name.CStr());
+				return false;
+			}
 		}
 
 		if (add_history == true)
