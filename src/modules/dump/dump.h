@@ -8,6 +8,9 @@
 //==============================================================================
 #pragma once
 
+#include <mutex>
+#include <set>
+
 #include "base/common_types.h"
 #include "base/info/dump.h"
 
@@ -38,6 +41,8 @@ namespace mdl
 		}
 
 	private:
+		bool PrepareDirectory(const ov::String &path);
+		void ForgetPreparedDirectory(const ov::String &path);
 		bool DumpToFile(const ov::String &path, const ov::String &file_name, const std::shared_ptr<const ov::Data> &data, bool add_history = true, bool append = false);
 		bool MakeDumpInfo(ov::String &dump_info);
 
@@ -57,5 +62,8 @@ namespace mdl
 		std::vector<DumpHistory> _dump_history_map;
 
 		std::map<int32_t, uint32_t> _extra_datas;
+
+		std::mutex _prepared_directories_mutex;
+		std::set<ov::String> _prepared_directories;
 	};
 }  // namespace mdl
