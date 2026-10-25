@@ -48,6 +48,10 @@ public:
 		const std::shared_ptr<AV1DecoderConfigurationRecord> &av1_config,
 		const Av1SequenceHeaderSummary &summary);
 
+	// Keep CEA registered-user-data SEI after AUD and before the first VCL NAL. Some RTMP
+	// encoders append it after VCL, where strict decoders discover CC1 but ignore its cues.
+	static bool MoveH264CaptionSeiAfterAud(std::shared_ptr<MediaPacket> &media_packet);
+
 	bool ProcessH264AVCCStream(const std::shared_ptr<info::Stream> &stream_info, const std::shared_ptr<MediaTrack> &media_track, std::shared_ptr<MediaPacket> &media_packet);
 	bool ProcessH264AnnexBStream(const std::shared_ptr<info::Stream> &stream_info, const std::shared_ptr<MediaTrack> &media_track, std::shared_ptr<MediaPacket> &media_packet);
 	bool InsertH264SPSPPSAnnexB(const std::shared_ptr<info::Stream> &stream_info, const std::shared_ptr<MediaTrack> &media_track, std::shared_ptr<MediaPacket> &media_packet, bool need_aud = false);

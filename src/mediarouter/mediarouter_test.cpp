@@ -14,6 +14,8 @@
 #include <gtest/gtest.h>
 #include <modules/bitstream/av1/av1_decoder_configuration_record.h>
 #include <modules/bitstream/av1/av1_types.h>
+#include <modules/bitstream/h264/h264_common.h>
+#include <modules/bitstream/h264/h264_decoder_configuration_record.h>
 
 #include "mediarouter_nomalize.h"
 
@@ -47,6 +49,186 @@ namespace
 		out = record;
 	}
 }  // namespace
+
+TEST(MediaRouterNormalizeH264, MovesLeadingSeiBehindAud)
+{
+	const uint8_t access_unit[] = {
+		0x00, 0x00, 0x00, 0x01, 0x06, 0x04, 0x01, 0x80,
+		0x00, 0x00, 0x01, 0x06, 0x05, 0x01, 0x80,
+		0x00, 0x00, 0x00, 0x01, 0x09, 0xF0,
+		0x00, 0x00, 0x00, 0x01, 0x41, 0xAA, 0xBB};
+	auto packet = std::make_shared<MediaPacket>(
+		cmn::MediaType::Video, 1,
+		std::make_shared<ov::Data>(access_unit, sizeof(access_unit)),
+		9000, 9000, 3000, MediaPacketFlag::NoFlag,
+		cmn::BitstreamFormat::H264_ANNEXB, cmn::PacketType::NALU);
+
+	FragmentationHeader fragments;
+	fragments.AddFragment(4, 4);
+	fragments.AddFragment(11, 4);
+	fragments.AddFragment(19, 2);
+	fragments.AddFragment(25, 3);
+	packet->SetFragHeader(&fragments);
+
+	ASSERT_TRUE(MediaRouterNormalize::MoveH264CaptionSeiAfterAud(packet));
+	const auto *output			 = packet->GetData()->GetDataAs<uint8_t>();
+	const auto *output_fragments = packet->GetFragHeader();
+	ASSERT_NE(output_fragments, nullptr);
+	ASSERT_EQ(output_fragments->GetCount(), 4);
+
+	const H264NalUnitType expected_types[] = {
+		H264NalUnitType::Aud,
+		H264NalUnitType::Sei,
+		H264NalUnitType::Sei,
+		H264NalUnitType::NonIdrSlice};
+	const std::vector<std::vector<uint8_t>> expected_payloads = {
+		{0x09, 0xF0},
+		{0x06, 0x04, 0x01, 0x80},
+		{0x06, 0x05, 0x01, 0x80},
+		{0x41, 0xAA, 0xBB}};
+
+	for (size_t index = 0; index < output_fragments->GetCount(); ++index)
+	{
+		auto fragment = output_fragments->GetFragment(index);
+		ASSERT_TRUE(fragment.has_value());
+		const size_t offset = std::get<0>(fragment.value());
+		const size_t length = std::get<1>(fragment.value());
+		ASSERT_EQ(length, expected_payloads[index].size());
+		EXPECT_EQ(static_cast<H264NalUnitType>(output[offset] & kH264NalUnitTypeMask),
+				  expected_types[index]);
+		EXPECT_EQ(std::vector<uint8_t>(output + offset, output + offset + length),
+				  expected_payloads[index]);
+	}
+}
+
+TEST(MediaRouterNormalizeH264, LeavesAudFirstAccessUnitUnchanged)
+{
+	const uint8_t access_unit[] = {
+		0x00, 0x00, 0x00, 0x01, 0x09, 0xF0,
+		0x00, 0x00, 0x00, 0x01, 0x06, 0x04, 0x01, 0x80,
+		0x00, 0x00, 0x00, 0x01, 0x41, 0xAA, 0xBB};
+	auto packet = std::make_shared<MediaPacket>(
+		cmn::MediaType::Video, 1,
+		std::make_shared<ov::Data>(access_unit, sizeof(access_unit)),
+		9000, 9000, 3000, MediaPacketFlag::NoFlag,
+		cmn::BitstreamFormat::H264_ANNEXB, cmn::PacketType::NALU);
+
+	FragmentationHeader fragments;
+	fragments.AddFragment(4, 2);
+	fragments.AddFragment(10, 4);
+	fragments.AddFragment(18, 3);
+	packet->SetFragHeader(&fragments);
+
+	auto original_data = packet->GetData();
+	EXPECT_FALSE(MediaRouterNormalize::MoveH264CaptionSeiAfterAud(packet));
+	EXPECT_EQ(packet->GetData(), original_data);
+}
+
+TEST(MediaRouterNormalizeH264, MovesTrailingCaptionSeiBeforeVcl)
+{
+	const uint8_t access_unit[] = {
+		0x00, 0x00, 0x00, 0x01, 0x09, 0xF0,
+		0x00, 0x00, 0x00, 0x01, 0x41, 0xAA, 0xBB,
+		0x00, 0x00, 0x00, 0x01, 0x06, 0x04, 0x08,
+		0xB5, 0x00, 0x31, 0x47, 0x41, 0x39, 0x34, 0x03, 0x80};
+	auto packet = std::make_shared<MediaPacket>(
+		cmn::MediaType::Video, 1,
+		std::make_shared<ov::Data>(access_unit, sizeof(access_unit)),
+		9000, 9000, 3000, MediaPacketFlag::NoFlag,
+		cmn::BitstreamFormat::H264_ANNEXB, cmn::PacketType::NALU);
+
+	FragmentationHeader fragments;
+	fragments.AddFragment(4, 2);
+	fragments.AddFragment(10, 3);
+	fragments.AddFragment(17, 12);
+	packet->SetFragHeader(&fragments);
+
+	ASSERT_TRUE(MediaRouterNormalize::MoveH264CaptionSeiAfterAud(packet));
+	const auto *output = packet->GetData()->GetDataAs<uint8_t>();
+	const auto *output_fragments = packet->GetFragHeader();
+	ASSERT_NE(output_fragments, nullptr);
+	ASSERT_EQ(output_fragments->GetCount(), 3);
+	const H264NalUnitType expected_types[] = {
+		H264NalUnitType::Aud,
+		H264NalUnitType::Sei,
+		H264NalUnitType::NonIdrSlice};
+	for (size_t index = 0; index < output_fragments->GetCount(); ++index)
+	{
+		auto fragment = output_fragments->GetFragment(index);
+		ASSERT_TRUE(fragment.has_value());
+		EXPECT_EQ(
+			static_cast<H264NalUnitType>(
+				output[std::get<0>(fragment.value())] & kH264NalUnitTypeMask),
+			expected_types[index]);
+	}
+}
+
+TEST(MediaRouterNormalizeH264, LeavesTrailingNonCaptionSeiUnchanged)
+{
+	const uint8_t access_unit[] = {
+		0x00, 0x00, 0x00, 0x01, 0x09, 0xF0,
+		0x00, 0x00, 0x00, 0x01, 0x41, 0xAA, 0xBB,
+		0x00, 0x00, 0x00, 0x01, 0x06, 0x05, 0x01, 0x80};
+	auto packet = std::make_shared<MediaPacket>(
+		cmn::MediaType::Video, 1,
+		std::make_shared<ov::Data>(access_unit, sizeof(access_unit)),
+		9000, 9000, 3000, MediaPacketFlag::NoFlag,
+		cmn::BitstreamFormat::H264_ANNEXB, cmn::PacketType::NALU);
+
+	FragmentationHeader fragments;
+	fragments.AddFragment(4, 2);
+	fragments.AddFragment(10, 3);
+	fragments.AddFragment(17, 4);
+	packet->SetFragHeader(&fragments);
+
+	auto original_data = packet->GetData();
+	EXPECT_FALSE(MediaRouterNormalize::MoveH264CaptionSeiAfterAud(packet));
+	EXPECT_EQ(packet->GetData(), original_data);
+}
+
+TEST(MediaRouterNormalizeH264, AvccPathMovesTrailingCaptionSeiAfterInsertedAud)
+{
+	const uint8_t access_unit[] = {
+		0x00, 0x00, 0x00, 0x03, 0x41, 0xAA, 0xBB,
+		0x00, 0x00, 0x00, 0x0C, 0x06, 0x04, 0x08,
+		0xB5, 0x00, 0x31, 0x47, 0x41, 0x39, 0x34, 0x03, 0x80};
+	auto packet = std::make_shared<MediaPacket>(
+		cmn::MediaType::Video, 1,
+		std::make_shared<ov::Data>(access_unit, sizeof(access_unit)),
+		9000, 9000, 3000, MediaPacketFlag::NoFlag,
+		cmn::BitstreamFormat::H264_AVCC, cmn::PacketType::NALU);
+	auto stream = std::make_shared<info::Stream>(StreamSourceType::Rtmp);
+	stream->SetName("caption-test");
+	auto track = std::make_shared<MediaTrack>();
+	track->SetMediaType(cmn::MediaType::Video);
+	track->SetCodecId(cmn::MediaCodecId::H264);
+	track->SetTimeBase(1, 90000);
+	track->SetResolution(1920, 1080);
+	track->SetDecoderConfigurationRecord(std::make_shared<AVCDecoderConfigurationRecord>());
+	ASSERT_TRUE(track->IsValid());
+
+	MediaRouterNormalize normalizer;
+	ASSERT_TRUE(normalizer.ProcessH264AVCCStream(stream, track, packet));
+	ASSERT_EQ(packet->GetBitstreamFormat(), cmn::BitstreamFormat::H264_ANNEXB);
+
+	const auto *output = packet->GetData()->GetDataAs<uint8_t>();
+	const auto *output_fragments = packet->GetFragHeader();
+	ASSERT_NE(output_fragments, nullptr);
+	ASSERT_EQ(output_fragments->GetCount(), 3);
+	const H264NalUnitType expected_types[] = {
+		H264NalUnitType::Aud,
+		H264NalUnitType::Sei,
+		H264NalUnitType::NonIdrSlice};
+	for (size_t index = 0; index < output_fragments->GetCount(); ++index)
+	{
+		auto fragment = output_fragments->GetFragment(index);
+		ASSERT_TRUE(fragment.has_value());
+		EXPECT_EQ(
+			static_cast<H264NalUnitType>(
+				output[std::get<0>(fragment.value())] & kH264NalUnitTypeMask),
+			expected_types[index]);
+	}
+}
 
 TEST(MediaRouterNormalizeAv1InBandSh, InBandSequenceHeaderUpdatesAllAv1ConfigFields)
 {

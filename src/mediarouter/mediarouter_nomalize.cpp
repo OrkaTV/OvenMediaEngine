@@ -9,6 +9,8 @@
 
 #include "mediarouter_nomalize.h"
 
+#include <algorithm>
+
 #include <base/ovlibrary/ovlibrary.h>
 #include <modules/bitstream/aac/aac_adts.h>
 #include <modules/bitstream/aac/aac_converter.h>
@@ -296,10 +298,139 @@ bool MediaRouterNormalize::ProcessH264AVCCStream(const std::shared_ptr<info::Str
 			}
 		}
 
+		MoveH264CaptionSeiAfterAud(media_packet);
 		return true;
 	}
 
 	return false;
+}
+
+bool MediaRouterNormalize::MoveH264CaptionSeiAfterAud(std::shared_ptr<MediaPacket> &media_packet)
+{
+	if (media_packet == nullptr || media_packet->GetData() == nullptr ||
+		media_packet->GetBitstreamFormat() != cmn::BitstreamFormat::H264_ANNEXB)
+	{
+		return false;
+	}
+
+	const auto *fragment_header = media_packet->GetFragHeader();
+	if (fragment_header == nullptr || fragment_header->GetCount() < 2)
+	{
+		return false;
+	}
+
+	const auto *buffer = media_packet->GetData()->GetDataAs<uint8_t>();
+	const size_t fragment_count = fragment_header->GetCount();
+	std::vector<H264NalUnitType> nal_types;
+	nal_types.reserve(fragment_count);
+	for (size_t index = 0; index < fragment_count; ++index)
+	{
+		auto fragment = fragment_header->GetFragment(index);
+		if (fragment.has_value() == false || std::get<1>(fragment.value()) == 0)
+		{
+			return false;
+		}
+
+		nal_types.push_back(static_cast<H264NalUnitType>(
+			buffer[std::get<0>(fragment.value())] & kH264NalUnitTypeMask));
+	}
+
+	auto aud_it = std::find(nal_types.begin(), nal_types.end(), H264NalUnitType::Aud);
+	if (aud_it == nal_types.end())
+	{
+		return false;
+	}
+	const size_t aud_index = std::distance(nal_types.begin(), aud_it);
+
+	for (size_t index = 0; index < aud_index; ++index)
+	{
+		if (nal_types[index] != H264NalUnitType::Sei)
+		{
+			return false;
+		}
+	}
+
+	auto is_vcl = [](H264NalUnitType type) {
+		const auto value = static_cast<uint8_t>(type);
+		return value >= 1 && value <= 5;
+	};
+	auto first_vcl_it = std::find_if(
+		nal_types.begin() + aud_index + 1, nal_types.end(), is_vcl);
+	if (first_vcl_it == nal_types.end())
+	{
+		return false;
+	}
+	const size_t first_vcl_index = std::distance(nal_types.begin(), first_vcl_it);
+
+	static constexpr uint8_t kCeaRegisteredUserData[] = {
+		0xB5, 0x00, 0x31, 0x47, 0x41, 0x39, 0x34, 0x03};
+	auto is_caption_sei = [&](size_t index) {
+		if (nal_types[index] != H264NalUnitType::Sei)
+		{
+			return false;
+		}
+		auto fragment		= fragment_header->GetFragment(index);
+		const size_t offset = std::get<0>(fragment.value());
+		const size_t length = std::get<1>(fragment.value());
+		return std::search(
+				   buffer + offset, buffer + offset + length,
+				   std::begin(kCeaRegisteredUserData), std::end(kCeaRegisteredUserData)) !=
+			   buffer + offset + length;
+	};
+
+	std::vector<size_t> moved_indices;
+	for (size_t index = 0; index < aud_index; ++index)
+	{
+		moved_indices.push_back(index);
+	}
+	for (size_t index = first_vcl_index + 1; index < fragment_count; ++index)
+	{
+		if (is_caption_sei(index))
+		{
+			moved_indices.push_back(index);
+		}
+	}
+	if (moved_indices.empty())
+	{
+		return false;
+	}
+
+	static constexpr uint8_t kStartCode[] = {0x00, 0x00, 0x00, 0x01};
+	auto reordered_data					  = std::make_shared<ov::Data>(media_packet->GetDataLength());
+	FragmentationHeader reordered_fragments;
+
+	auto append_fragment = [&](size_t index) {
+		auto fragment		= fragment_header->GetFragment(index);
+		const size_t offset = std::get<0>(fragment.value());
+		const size_t length = std::get<1>(fragment.value());
+		reordered_data->Append(kStartCode, sizeof(kStartCode));
+		reordered_fragments.AddFragment(reordered_data->GetLength(), length);
+		reordered_data->Append(buffer + offset, length);
+	};
+	auto is_moved = [&](size_t index) {
+		return std::find(moved_indices.begin(), moved_indices.end(), index) != moved_indices.end();
+	};
+
+	append_fragment(aud_index);
+	for (size_t index = aud_index + 1; index < first_vcl_index; ++index)
+	{
+		append_fragment(index);
+	}
+	for (size_t index : moved_indices)
+	{
+		append_fragment(index);
+	}
+	for (size_t index = first_vcl_index; index < fragment_count; ++index)
+	{
+		if (is_moved(index) == false)
+		{
+			append_fragment(index);
+		}
+	}
+
+	media_packet->SetData(reordered_data);
+	media_packet->SetFragHeader(&reordered_fragments);
+	return true;
 }
 
 bool MediaRouterNormalize::ProcessH264AnnexBStream(const std::shared_ptr<info::Stream> &stream_info, const std::shared_ptr<MediaTrack> &media_track, std::shared_ptr<MediaPacket> &media_packet)
@@ -436,6 +567,7 @@ bool MediaRouterNormalize::ProcessH264AnnexBStream(const std::shared_ptr<info::S
 		}
 	}
 
+	MoveH264CaptionSeiAfterAud(media_packet);
 	return true;
 }
 
