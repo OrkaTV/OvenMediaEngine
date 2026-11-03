@@ -1425,7 +1425,13 @@ bool HlsStream::DumpSegment(const std::shared_ptr<mdl::Dump> &dump, const ov::St
 		return false;
 	}
 
-	// Append to media playlist data
+	// Keep a dump-specific VOD playlist. The live playlist only retains its configured
+	// window, so rewriting playlist->ToString(false) would discard older dumped segments.
+	// Mountpoint for S3 cannot append to general-purpose buckets, but it can replace an
+	// object with one sequential write when mounted with --allow-overwrite.
+	// Configured HLS dumps start with the stream, so the first callback contains segment 0.
+	// A future mid-stream StartDump implementation must synthesize a header for only the
+	// segments it also writes instead of seeding from the existing live window.
 	auto playlist = GetMediaPlaylist(packager_id);
 	if (!playlist)
 	{
@@ -1434,34 +1440,32 @@ bool HlsStream::DumpSegment(const std::shared_ptr<mdl::Dump> &dump, const ov::St
 		return false;
 	}
 
-	std::shared_ptr<ov::Data> playlist_data;
-	if (segment_number == 0)
 	{
-		playlist_data = playlist->ToString(false).ToData(false);
+		std::lock_guard<std::shared_mutex> lock(_dump_media_playlists_lock);
+		auto &dump_playlists = _dump_media_playlists[dump->GetId()];
+		auto [it, inserted] = dump_playlists.emplace(packager_id, ov::String());
+		if (inserted)
+		{
+			it->second = playlist->ToString(false);
+		}
+		else
+		{
+			it->second += playlist->MakeSegmentString(segment);
+		}
+
+		auto playlist_data = it->second.ToData(false);
 		if (!playlist_data)
 		{
 			logte("HlsStream(%s/%s) - Could not get playlist data for variant %s during dumping.",
 				  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), packager_id.CStr());
 			return false;
 		}
-	}
-	else
-	{
-		auto playlist_latest_segment = playlist->GetLatestSegment();
-		if (!playlist_latest_segment)
+		if (DumpData(dump, playlist->GetPlaylistFileName(), playlist_data, false) == false)
 		{
-			logte("HlsStream(%s/%s) - Could not find latest segment for variant %s during dumping.",
-				GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), packager_id.CStr());
+			logte("HlsStream(%s/%s) - Dump '%s' failed to rewrite media playlist: %s",
+				  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr(), playlist->GetPlaylistFileName().CStr());
 			return false;
 		}
-		playlist_data = playlist->MakeSegmentString(playlist_latest_segment).ToData(false);
-	}
-
-	if (DumpData(dump, playlist->GetPlaylistFileName(), playlist_data, true) == false)
-	{
-		logte("HlsStream(%s/%s) - Dump '%s' failed to dump media playlist: %s",
-			  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr(), playlist->GetPlaylistFileName().CStr());
-		return false;
 	}
 
 	return true;
@@ -1490,6 +1494,34 @@ void HlsStream::StopDump(const std::shared_ptr<mdl::Dump> &dump)
 	}
 
 	logti("HlsStream(%s/%s) - Stopping dump '%s'.", GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr());
+
+	// Finalize every accumulated media playlist before publishing the final master.
+	// Rewriting instead of appending keeps this path compatible with Mountpoint for S3.
+	{
+		std::lock_guard<std::shared_mutex> lock(_dump_media_playlists_lock);
+		auto dump_it = _dump_media_playlists.find(dump->GetId());
+		if (dump_it != _dump_media_playlists.end())
+		{
+			for (auto &[packager_id, playlist_text] : dump_it->second)
+			{
+				auto playlist = GetMediaPlaylist(packager_id);
+				if (!playlist)
+				{
+					logte("HlsStream(%s/%s) - Could not find playlist for variant %s while finalizing dump '%s'.",
+						  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), packager_id.CStr(), dump->GetId().CStr());
+					continue;
+				}
+
+				playlist_text += "#EXT-X-ENDLIST\n";
+				if (!DumpData(dump, playlist->GetPlaylistFileName(), playlist_text.ToData(false), false))
+				{
+					logte("HlsStream(%s/%s) - Dump '%s' failed to finalize media playlist: %s",
+						  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr(), playlist->GetPlaylistFileName().CStr());
+				}
+			}
+			_dump_media_playlists.erase(dump_it);
+		}
+	}
 
 	// Dump final master playlists
 	DumpMasterPlaylist(dump);
