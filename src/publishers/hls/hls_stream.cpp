@@ -1443,27 +1443,29 @@ bool HlsStream::DumpSegment(const std::shared_ptr<mdl::Dump> &dump, const ov::St
 	{
 		std::lock_guard<std::shared_mutex> lock(_dump_media_playlists_lock);
 		auto &dump_playlists = _dump_media_playlists[dump->GetId()];
-		auto [it, inserted] = dump_playlists.emplace(packager_id, ov::String());
+		auto [it, inserted] = dump_playlists.emplace(
+			packager_id,
+			DumpMediaPlaylist{playlist->GetPlaylistFileName(), ov::String()});
 		if (inserted)
 		{
-			it->second = playlist->ToString(false);
+			it->second.text = playlist->ToString(false);
 		}
 		else
 		{
-			it->second += playlist->MakeSegmentString(segment);
+			it->second.text += playlist->MakeSegmentString(segment);
 		}
 
-		auto playlist_data = it->second.ToData(false);
+		auto playlist_data = it->second.text.ToData(false);
 		if (!playlist_data)
 		{
 			logte("HlsStream(%s/%s) - Could not get playlist data for variant %s during dumping.",
 				  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), packager_id.CStr());
 			return false;
 		}
-		if (DumpData(dump, playlist->GetPlaylistFileName(), playlist_data, false) == false)
+		if (DumpData(dump, it->second.file_name, playlist_data, false) == false)
 		{
 			logte("HlsStream(%s/%s) - Dump '%s' failed to rewrite media playlist: %s",
-				  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr(), playlist->GetPlaylistFileName().CStr());
+				  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr(), it->second.file_name.CStr());
 			return false;
 		}
 	}
@@ -1502,21 +1504,14 @@ void HlsStream::StopDump(const std::shared_ptr<mdl::Dump> &dump)
 		auto dump_it = _dump_media_playlists.find(dump->GetId());
 		if (dump_it != _dump_media_playlists.end())
 		{
-			for (auto &[packager_id, playlist_text] : dump_it->second)
+			for (auto &entry : dump_it->second)
 			{
-				auto playlist = GetMediaPlaylist(packager_id);
-				if (!playlist)
-				{
-					logte("HlsStream(%s/%s) - Could not find playlist for variant %s while finalizing dump '%s'.",
-						  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), packager_id.CStr(), dump->GetId().CStr());
-					continue;
-				}
-
-				playlist_text += "#EXT-X-ENDLIST\n";
-				if (!DumpData(dump, playlist->GetPlaylistFileName(), playlist_text.ToData(false), false))
+				auto &playlist = entry.second;
+				playlist.text += "#EXT-X-ENDLIST\n";
+				if (!DumpData(dump, playlist.file_name, playlist.text.ToData(false), false))
 				{
 					logte("HlsStream(%s/%s) - Dump '%s' failed to finalize media playlist: %s",
-						  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr(), playlist->GetPlaylistFileName().CStr());
+						  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr(), playlist.file_name.CStr());
 				}
 			}
 			_dump_media_playlists.erase(dump_it);

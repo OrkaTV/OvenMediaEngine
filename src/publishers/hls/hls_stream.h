@@ -154,9 +154,15 @@ private:
 	std::map<ov::String, std::shared_ptr<mdl::Dump>> _dumps;
 	std::shared_mutex _dumps_lock;
 
-	// dump id -> packager id -> complete VOD media playlist text. Kept separately
-	// from HlsMediaPlaylist because the live object discards segments outside its window.
-	std::map<ov::String, std::map<ov::String, ov::String>> _dump_media_playlists;
+	struct DumpMediaPlaylist
+	{
+		ov::String file_name;
+		ov::String text;
+	};
+
+	// dump id -> packager id -> complete VOD media playlist. Kept separately from
+	// HlsMediaPlaylist because the live object is removed before dump finalization.
+	std::map<ov::String, std::map<ov::String, DumpMediaPlaylist>> _dump_media_playlists;
 	std::shared_mutex _dump_media_playlists_lock;
 
 	bool _ready_to_play = false; // true if the stream is ready to play, all playlists are ready and have enough segments
