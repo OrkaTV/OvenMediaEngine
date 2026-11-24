@@ -71,6 +71,10 @@ public:
 	/// Origin Mode Session Management
 	std::shared_ptr<HlsSession> GetSessionFromPool();
 
+	// <result, error message>
+	std::tuple<bool, ov::String> StartDump(const std::shared_ptr<info::Dump> &dump_info);
+	std::tuple<bool, ov::String> StopDump(const std::shared_ptr<info::Dump> &dump_info);
+
 private:
 	bool Start() override;
 	bool Stop() override;
@@ -120,7 +124,7 @@ private:
 	bool DumpSegment(const std::shared_ptr<mdl::Dump>& dump, const ov::String& packager_id, const uint32_t& segment_number);
 	bool DumpData(const std::shared_ptr<mdl::Dump>& dump, const ov::String& file_name, const std::shared_ptr<const ov::Data>& data, bool append = false);
 	void StopDumps();
-	void StopDump(const std::shared_ptr<mdl::Dump>& dumper);
+	bool FinalizeDump(const std::shared_ptr<mdl::Dump>& dumper);
 
 	uint32_t _worker_count = 0;
 
@@ -158,6 +162,7 @@ private:
 	{
 		ov::String file_name;
 		ov::String text;
+		int64_t last_segment_number = -1;
 	};
 
 	// dump id -> packager id -> complete VOD media playlist. Kept separately from

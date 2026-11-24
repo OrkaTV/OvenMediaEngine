@@ -137,6 +137,27 @@ TEST(HlsMasterPlaylist, OmitsClosedCaptionsByDefault)
 	EXPECT_EQ(playlist.IndexOf("TYPE=CLOSED-CAPTIONS"), -1);
 }
 
+TEST(HlsMediaPlaylist, SnapshotMatchesTheLivePlaylistWindow)
+{
+	HlsMediaPlaylist::HlsMediaPlaylistConfig config;
+	config.segment_count = 2;
+	HlsMediaPlaylist playlist("video", "video.m3u8", config);
+
+	for (int64_t number = 0; number < 4; number++)
+	{
+		playlist.OnSegmentCreated(MakeSegment(number, number * 90000, 1000.0, 1, false, "avc1.640028"));
+	}
+
+	auto snapshot = playlist.GetSnapshot(false);
+	ASSERT_EQ(snapshot.segments.size(), 3u);
+	EXPECT_EQ(snapshot.segments.front()->GetNumber(), 1);
+	EXPECT_EQ(snapshot.segments.back()->GetNumber(), 3);
+	EXPECT_EQ(snapshot.text, playlist.ToString(false));
+	EXPECT_EQ(snapshot.text.IndexOf("seg_0.ts"), -1);
+	EXPECT_NE(snapshot.text.IndexOf("seg_1.ts"), -1);
+	EXPECT_NE(snapshot.text.IndexOf("seg_3.ts"), -1);
+}
+
 // ---------------------------------------------------------------------------
 // mpegts::Packetizer - the PMT version bumps and the PSI is re-broadcast only
 // when the elementary stream type (codec) changes.

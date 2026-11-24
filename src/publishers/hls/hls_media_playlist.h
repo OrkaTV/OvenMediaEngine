@@ -20,6 +20,12 @@
 class HlsMediaPlaylist
 {
 public:
+	struct Snapshot
+	{
+		ov::String text;
+		std::vector<std::shared_ptr<base::modules::Segment>> segments;
+	};
+
 	struct HlsMediaPlaylistConfig
 	{
 		uint8_t version = 3;
@@ -63,6 +69,7 @@ public:
 	ov::String GetCodecsString() const;
 
 	ov::String ToString(bool rewind) const;
+	Snapshot GetSnapshot(bool rewind) const;
 	ov::String MakeSegmentString(const std::shared_ptr<base::modules::Segment> &segment) const;
 	std::shared_ptr<base::modules::Segment> GetLatestSegment() const;
 
@@ -71,6 +78,8 @@ public:
 	std::size_t GetSegmentCount() const;
 
 private:
+	ov::String BuildString(bool rewind, std::vector<std::shared_ptr<base::modules::Segment>> *segments) const;
+
 	// Recompute the cached CODECS union. Caller must hold _segments_mutex exclusively.
 	void RebuildCodecsParameter();
 

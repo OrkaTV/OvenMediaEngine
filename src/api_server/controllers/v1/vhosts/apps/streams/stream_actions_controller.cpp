@@ -122,6 +122,7 @@ namespace api
 		// 	"outputStreamName": "stream",
 		// 	"id": "dump_id",
 		// 	"outputPath": "/tmp/",
+		// 	"publisher": "llhls" | "hls", // Optional, defaults to llhls
 		// 	"playlist" : ["llhls.m3u8", "abr.m3u8"],
 		// 	"userData":{
 		// 		"fileName" : "s3.info",
@@ -162,15 +163,36 @@ namespace api
 			}
 
 			auto output_stream = *output_stream_it;
-			auto llhls_stream  = GetOutputStream<LLHlsStream>(output_stream, PublisherType::LLHls);
-			if (llhls_stream == nullptr)
+			auto publisher = request_body.get("publisher", "llhls").asString();
+			std::tuple<bool, ov::String> dump_result;
+			if (publisher == "hls")
 			{
-				throw http::HttpError(http::StatusCode::NotFound,
-									  "Could not find LLHLS stream: [%s/%s/%s]",
-									  vhost->GetName().CStr(), app->GetVHostAppName().GetAppName().CStr(), dump_info->GetStreamName().CStr());
+				auto hls_stream = GetOutputStream<HlsStream>(output_stream, PublisherType::Hls);
+				if (hls_stream == nullptr)
+				{
+					throw http::HttpError(http::StatusCode::NotFound,
+										  "Could not find HLS stream: [%s/%s/%s]",
+										  vhost->GetName().CStr(), app->GetVHostAppName().GetAppName().CStr(), dump_info->GetStreamName().CStr());
+				}
+				dump_result = hls_stream->StartDump(dump_info);
+			}
+			else if (publisher == "llhls")
+			{
+				auto llhls_stream = GetOutputStream<LLHlsStream>(output_stream, PublisherType::LLHls);
+				if (llhls_stream == nullptr)
+				{
+					throw http::HttpError(http::StatusCode::NotFound,
+										  "Could not find LLHLS stream: [%s/%s/%s]",
+										  vhost->GetName().CStr(), app->GetVHostAppName().GetAppName().CStr(), dump_info->GetStreamName().CStr());
+				}
+				dump_result = llhls_stream->StartDump(dump_info);
+			}
+			else
+			{
+				throw http::HttpError(http::StatusCode::BadRequest, "publisher must be hls or llhls");
 			}
 
-			auto [result, reason] = llhls_stream->StartDump(dump_info);
+			auto &[result, reason] = dump_result;
 			if (result == false)
 			{
 				throw http::HttpError(http::StatusCode::InternalServerError,
@@ -184,7 +206,8 @@ namespace api
 		// POST /v1/vhosts/<vhost_name>/apps/<app_name>/streams/<stream_name>:stopHlsDump
 		// {
 		//  "outputStreamName": "stream",
-		//  "id": "dump_id"
+		//  "id": "dump_id",
+		//  "publisher": "llhls" | "hls" // Optional, defaults to llhls
 		// }
 		ApiResponse StreamActionsController::OnPostStopHLSDump(const std::shared_ptr<http::svr::HttpExchange> &client, const Json::Value &request_body,
 															   const std::shared_ptr<mon::HostMetrics> &vhost,
@@ -218,15 +241,36 @@ namespace api
 			}
 
 			auto output_stream = *output_stream_it;
-			auto llhls_stream  = GetOutputStream<LLHlsStream>(output_stream, PublisherType::LLHls);
-			if (llhls_stream == nullptr)
+			auto publisher = request_body.get("publisher", "llhls").asString();
+			std::tuple<bool, ov::String> dump_result;
+			if (publisher == "hls")
 			{
-				throw http::HttpError(http::StatusCode::NotFound,
-									  "Could not find LLHLS stream: [%s/%s/%s]",
-									  vhost->GetName().CStr(), app->GetVHostAppName().GetAppName().CStr(), dump_info->GetStreamName().CStr());
+				auto hls_stream = GetOutputStream<HlsStream>(output_stream, PublisherType::Hls);
+				if (hls_stream == nullptr)
+				{
+					throw http::HttpError(http::StatusCode::NotFound,
+										  "Could not find HLS stream: [%s/%s/%s]",
+										  vhost->GetName().CStr(), app->GetVHostAppName().GetAppName().CStr(), dump_info->GetStreamName().CStr());
+				}
+				dump_result = hls_stream->StopDump(dump_info);
+			}
+			else if (publisher == "llhls")
+			{
+				auto llhls_stream = GetOutputStream<LLHlsStream>(output_stream, PublisherType::LLHls);
+				if (llhls_stream == nullptr)
+				{
+					throw http::HttpError(http::StatusCode::NotFound,
+										  "Could not find LLHLS stream: [%s/%s/%s]",
+										  vhost->GetName().CStr(), app->GetVHostAppName().GetAppName().CStr(), dump_info->GetStreamName().CStr());
+				}
+				dump_result = llhls_stream->StopDump(dump_info);
+			}
+			else
+			{
+				throw http::HttpError(http::StatusCode::BadRequest, "publisher must be hls or llhls");
 			}
 
-			auto [result, reason] = llhls_stream->StopDump(dump_info);
+			auto &[result, reason] = dump_result;
 			if (result == false)
 			{
 				throw http::HttpError(http::StatusCode::InternalServerError,

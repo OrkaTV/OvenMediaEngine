@@ -165,7 +165,20 @@ bool HlsMediaPlaylist::OnSegmentDeleted(const std::shared_ptr<base::modules::Seg
 ov::String HlsMediaPlaylist::ToString(bool rewind) const
 {
 	std::shared_lock<std::shared_mutex> lock(_segments_mutex);
+	return BuildString(rewind, nullptr);
+}
 
+HlsMediaPlaylist::Snapshot HlsMediaPlaylist::GetSnapshot(bool rewind) const
+{
+	std::shared_lock<std::shared_mutex> lock(_segments_mutex);
+
+	Snapshot snapshot;
+	snapshot.text = BuildString(rewind, &snapshot.segments);
+	return snapshot;
+}
+
+ov::String HlsMediaPlaylist::BuildString(bool rewind, std::vector<std::shared_ptr<base::modules::Segment>> *segments) const
+{
 	ov::String result = "#EXTM3U\n";
 
 	result += ov::String::FormatString("#EXT-X-VERSION:%d\n", 3);
@@ -220,6 +233,10 @@ ov::String HlsMediaPlaylist::ToString(bool rewind) const
 	{
 		const auto &segment = it->second;
 		result += MakeSegmentString(segment);
+		if (segments != nullptr)
+		{
+			segments->push_back(segment);
+		}
 	}
 
 	if (_end_list == true)

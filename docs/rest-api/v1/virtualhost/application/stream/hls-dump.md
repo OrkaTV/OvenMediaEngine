@@ -4,7 +4,10 @@ description: "Start and stop dumping OvenMediaEngine HLS segments to storage thr
 sidebar_position: 49
 ---
 
-The [LLHLS Dump feature](../../../../../streaming/low-latency-hls.md#dump) can be controlled with this API.
+The [LLHLS Dump feature](../../../../../streaming/low-latency-hls.md#dump) and
+the MPEG-TS HLS publisher's dump feature can be controlled with this API.
+Requests continue to target LLHLS by default for backward compatibility. Set
+`publisher` to `hls` to control MPEG-TS HLS dumps.
 
 ## Start Dump
 
@@ -31,6 +34,7 @@ Content-Type: application/json
   "outputStreamName": "stream",
   "id": "unique_dump_id",
   "outputPath": "/tmp/",
+  "publisher": "llhls",
   "playlist" : ["llhls.m3u8", "abr.m3u8"],
   "infoFile": "/home/abc/xxx/unique_info_file_name.info",
   "userData": "access_key_id='AKIAXFOT7EWH3ZA4XXXX'"
@@ -43,6 +47,10 @@ Content-Type: application/json
 # outputPath (required)
   Directory path to output. The directory must be writable by the OME process. 
   OME will create the directory if it doesn't exist.
+# publisher (optional)
+  Publisher to dump: "llhls" or "hls". Defaults to "llhls".
+  The "hls" publisher writes MPEG-TS segments and seeds the new dump from its
+  current live playlist window.
 # playlist (optional)
   Dump the master playlist set in outputPath. It must be entered 
   in Json array format, and multiple playlists can be specified.
@@ -178,7 +186,8 @@ Content-Type: application/json
 ```json
 {
   "outputStreamName": "stream",
-  "id": "dump_id"
+  "id": "dump_id",
+  "publisher": "llhls"
 }
 
 # outputStreamName (required)
@@ -186,6 +195,12 @@ Content-Type: application/json
 # id (optional)
   This is the id passed when calling the startHlsDump API. 
   If id is not passed, all dump in progress at outputStreamName is aborted.
+# publisher (optional)
+  Publisher to stop: "llhls" or "hls". Defaults to "llhls".
+  Stopping an "hls" dump writes #EXT-X-ENDLIST to each dumped media playlist
+  and removes the dump from the running stream. It may then be started again.
+  Use a new outputPath when restarting so the new live interval does not
+  replace the finalized playlists from the previous interval.
 ```
 
 </details>

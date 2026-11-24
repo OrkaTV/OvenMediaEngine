@@ -1430,8 +1430,7 @@ bool HlsStream::DumpSegment(const std::shared_ptr<mdl::Dump> &dump, const ov::St
 	// Mountpoint for S3 cannot append to general-purpose buckets, but it can replace an
 	// object with one sequential write when mounted with --allow-overwrite.
 	// Configured HLS dumps start with the stream, so the first callback contains segment 0.
-	// A future mid-stream StartDump implementation must synthesize a header for only the
-	// segments it also writes instead of seeding from the existing live window.
+	// API-started dumps seed this state atomically from the current live playlist window.
 	auto playlist = GetMediaPlaylist(packager_id);
 	if (!playlist)
 	{
@@ -1445,7 +1444,11 @@ bool HlsStream::DumpSegment(const std::shared_ptr<mdl::Dump> &dump, const ov::St
 		auto &dump_playlists = _dump_media_playlists[dump->GetId()];
 		auto [it, inserted] = dump_playlists.emplace(
 			packager_id,
-			DumpMediaPlaylist{playlist->GetPlaylistFileName(), ov::String()});
+			DumpMediaPlaylist{playlist->GetPlaylistFileName(), ov::String(), -1});
+		if (inserted == false && static_cast<int64_t>(segment_number) <= it->second.last_segment_number)
+		{
+			return true;
+		}
 		if (inserted)
 		{
 			it->second.text = playlist->ToString(false);
@@ -1454,6 +1457,7 @@ bool HlsStream::DumpSegment(const std::shared_ptr<mdl::Dump> &dump, const ov::St
 		{
 			it->second.text += playlist->MakeSegmentString(segment);
 		}
+		it->second.last_segment_number = segment_number;
 
 		auto playlist_data = it->second.text.ToData(false);
 		if (!playlist_data)
@@ -1478,24 +1482,140 @@ bool HlsStream::DumpData(const std::shared_ptr<mdl::Dump> &dump, const ov::Strin
 	return dump->DumpData(file_name, data, append);
 }
 
+std::tuple<bool, ov::String> HlsStream::StartDump(const std::shared_ptr<info::Dump> &info)
+{
+	std::unique_lock<std::shared_mutex> dumps_lock(_dumps_lock);
+
+	if (_ready_to_play == false || IsConcluded())
+	{
+		return {false, "HLS stream is not available for dumping"};
+	}
+
+	for (const auto &[id, dump] : _dumps)
+	{
+		if (id == info->GetId())
+		{
+			return {false, "Duplicate ID"};
+		}
+		if (dump->GetInfoFileUrl().IsEmpty() == false && dump->GetInfoFileUrl() == info->GetInfoFileUrl())
+		{
+			return {false, "Duplicate info file"};
+		}
+	}
+
+	auto dump = std::make_shared<mdl::Dump>(info);
+	dump->SetEnabled(true);
+
+	std::map<ov::String, DumpMediaPlaylist> seeded_playlists;
+	std::shared_lock<std::shared_mutex> playlists_lock(_media_playlists_guard);
+	auto media_playlists = _media_playlists;
+	playlists_lock.unlock();
+
+	for (const auto &[packager_id, playlist] : media_playlists)
+	{
+		auto snapshot = playlist->GetSnapshot(false);
+		if (snapshot.segments.empty())
+		{
+			continue;
+		}
+
+		for (const auto &segment : snapshot.segments)
+		{
+			auto segment_data = segment->GetData();
+			if (segment_data == nullptr ||
+				DumpData(dump, GetSegmentName(packager_id, segment->GetNumber()), segment_data, false) == false)
+			{
+				return {false, ov::String::FormatString("Could not dump segment for variant %s", packager_id.CStr())};
+			}
+		}
+
+		auto playlist_data = snapshot.text.ToData(false);
+		if (playlist_data == nullptr || DumpData(dump, playlist->GetPlaylistFileName(), playlist_data, false) == false)
+		{
+			return {false, ov::String::FormatString("Could not dump media playlist for variant %s", packager_id.CStr())};
+		}
+
+		seeded_playlists.emplace(
+			packager_id,
+			DumpMediaPlaylist{
+				playlist->GetPlaylistFileName(),
+				snapshot.text,
+				static_cast<int64_t>(snapshot.segments.back()->GetNumber())});
+	}
+
+	if (DumpMasterPlaylist(dump) == false)
+	{
+		return {false, "Could not dump master playlist"};
+	}
+
+	{
+		std::lock_guard<std::shared_mutex> playlists_lock(_dump_media_playlists_lock);
+		_dump_media_playlists[dump->GetId()] = std::move(seeded_playlists);
+	}
+	_dumps.emplace(dump->GetId(), dump);
+
+	return {true, ""};
+}
+
+std::tuple<bool, ov::String> HlsStream::StopDump(const std::shared_ptr<info::Dump> &dump_info)
+{
+	std::unique_lock<std::shared_mutex> lock(_dumps_lock);
+
+	if (dump_info->GetId().IsEmpty() == false)
+	{
+		auto it = _dumps.find(dump_info->GetId());
+		if (it == _dumps.end())
+		{
+			return {false, "Could not find dump info"};
+		}
+
+		auto finalized = FinalizeDump(it->second);
+		_dumps.erase(it);
+		if (finalized == false)
+		{
+			return {false, "Could not finalize dump"};
+		}
+	}
+	else
+	{
+		bool finalized = true;
+		for (const auto &[id, dump] : _dumps)
+		{
+			finalized = FinalizeDump(dump) && finalized;
+		}
+		_dumps.clear();
+		if (finalized == false)
+		{
+			return {false, "Could not finalize all dumps"};
+		}
+	}
+
+	return {true, ""};
+}
+
 void HlsStream::StopDumps()
 {
 	std::lock_guard<std::shared_mutex> dumper_lock(_dumps_lock);
 	for (auto &[dump_id, dump] : _dumps)
 	{
-		StopDump(dump);
+		if (FinalizeDump(dump) == false)
+		{
+			logte("HlsStream(%s/%s) - Failed to finalize dump '%s' while stopping.",
+				  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump_id.CStr());
+		}
 	}
 	_dumps.clear();
 }
 
-void HlsStream::StopDump(const std::shared_ptr<mdl::Dump> &dump)
+bool HlsStream::FinalizeDump(const std::shared_ptr<mdl::Dump> &dump)
 {
 	if (!dump)
 	{
-		return;
+		return false;
 	}
 
 	logti("HlsStream(%s/%s) - Stopping dump '%s'.", GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr());
+	bool result = true;
 
 	// Finalize every accumulated media playlist before publishing the final master.
 	// Rewriting instead of appending keeps this path compatible with Mountpoint for S3.
@@ -1512,6 +1632,7 @@ void HlsStream::StopDump(const std::shared_ptr<mdl::Dump> &dump)
 				{
 					logte("HlsStream(%s/%s) - Dump '%s' failed to finalize media playlist: %s",
 						  GetApplication()->GetVHostAppName().CStr(), GetName().CStr(), dump->GetId().CStr(), playlist.file_name.CStr());
+					result = false;
 				}
 			}
 			_dump_media_playlists.erase(dump_it);
@@ -1519,9 +1640,10 @@ void HlsStream::StopDump(const std::shared_ptr<mdl::Dump> &dump)
 	}
 
 	// Dump final master playlists
-	DumpMasterPlaylist(dump);
+	result = DumpMasterPlaylist(dump) && result;
 
-	dump->CompleteDump();
+	result = dump->CompleteDump() && result;
+	return result;
 }
 
 bool HlsStream::AddVttPackager(const std::shared_ptr<const MediaTrack> &track)
